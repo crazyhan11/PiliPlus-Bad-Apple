@@ -13,5 +13,11 @@ import UIKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    engineBridge.pluginRegistry
+      .registrar(forPlugin: "IOSGlassSurface")?
+      .register(
+        IOSGlassSurfaceFactory(),
+        withId: "com.piliplus.badapple/ios-glass-surface"
+      )
   }
 }

@@ -1,4 +1,5 @@
 import 'package:PiliPlus/common/widgets/scroll_physics.dart';
+import 'package:PiliPlus/common/widgets/ios_glass_surface.dart';
 import 'package:PiliPlus/http/loading_state.dart';
 import 'package:PiliPlus/models/common/dynamic/dynamics_type.dart';
 import 'package:PiliPlus/models/common/dynamic/up_panel_position.dart';
@@ -164,41 +165,54 @@ class _DynamicsPageState extends CommonPageState<DynamicsPage>
         leading = _createDynamicBtn(theme, isRight: false);
     }
 
+    final appBar = AppBar(
+      primary: false,
+      leading: leading,
+      leadingWidth: 50,
+      toolbarHeight: 50,
+      backgroundColor: Colors.transparent,
+      title: SizedBox(
+        height: 50,
+        child: TabBar(
+          dividerHeight: 0,
+          isScrollable: true,
+          tabAlignment: .center,
+          dividerColor: Colors.transparent,
+          labelColor: theme.colorScheme.primary,
+          indicatorColor: theme.colorScheme.primary,
+          controller: _dynamicsController.tabController,
+          unselectedLabelColor: theme.colorScheme.onSurface,
+          labelStyle:
+              TabBarTheme.of(context).labelStyle?.copyWith(fontSize: 13) ??
+              const TextStyle(fontSize: 13),
+          tabs: DynamicsTabType.values.map((e) => Tab(text: e.label)).toList(),
+          onTap: (index) {
+            if (!_dynamicsController.tabController.indexIsChanging) {
+              _dynamicsController.animateToTop();
+            }
+          },
+        ),
+      ),
+      actions: actions,
+    );
+    final PreferredSizeWidget effectiveAppBar = IOSGlassSurface.isSupported
+        ? PreferredSize(
+            preferredSize: const Size.fromHeight(58),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 4, 14, 4),
+              child: IOSGlassSurface(
+                borderRadius: 25,
+                tintColor: const Color(0x16000000),
+                child: appBar,
+              ),
+            ),
+          )
+        : appBar;
+
     return Scaffold(
       resizeToAvoidBottomInset: false,
       backgroundColor: Colors.transparent,
-      appBar: AppBar(
-        primary: false,
-        leading: leading,
-        leadingWidth: 50,
-        toolbarHeight: 50,
-        backgroundColor: Colors.transparent,
-        title: SizedBox(
-          height: 50,
-          child: TabBar(
-            dividerHeight: 0,
-            isScrollable: true,
-            tabAlignment: .center,
-            dividerColor: Colors.transparent,
-            labelColor: theme.colorScheme.primary,
-            indicatorColor: theme.colorScheme.primary,
-            controller: _dynamicsController.tabController,
-            unselectedLabelColor: theme.colorScheme.onSurface,
-            labelStyle:
-                TabBarTheme.of(context).labelStyle?.copyWith(fontSize: 13) ??
-                const TextStyle(fontSize: 13),
-            tabs: DynamicsTabType.values
-                .map((e) => Tab(text: e.label))
-                .toList(),
-            onTap: (index) {
-              if (!_dynamicsController.tabController.indexIsChanging) {
-                _dynamicsController.animateToTop();
-              }
-            },
-          ),
-        ),
-        actions: actions,
-      ),
+      appBar: effectiveAppBar,
       drawer: drawer,
       endDrawer: endDrawer,
       body: onBuild(child),

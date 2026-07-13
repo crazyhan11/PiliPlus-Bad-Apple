@@ -6,7 +6,8 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 FLUTTER_BIN="${FLUTTER_BIN:-flutter}"
 APP_PATH="${ROOT_DIR}/build/ios/iphoneos/Runner.app"
 OUTPUT_DIR="${ROOT_DIR}/dist"
-OUTPUT_PATH="${OUTPUT_DIR}/PiliPlus-Bad-Apple-IGL-ios-arm64-unsigned.ipa"
+OUTPUT_NAME="${OUTPUT_NAME:-PiliPlus-Bad-Apple-iOS26-AV1-IGL-Liquid-Glass-arm64-unsigned.ipa}"
+OUTPUT_PATH="${OUTPUT_DIR}/${OUTPUT_NAME}"
 STAGING_DIR="$(mktemp -d)"
 
 cleanup() {

@@ -51,6 +51,14 @@ VideoToolbox CVPixelBuffer
 
 已在 iPad mini (A17 Pro) 与 iPhone 12 mini 真机验证；目标内容包括 4K AV1、横竖屏、全屏、拖动、暂停/恢复和多尺寸切换。工程当前最低目标为 iOS 26.0。
 
+### iOS 26 Liquid Glass
+
+首页、动态页与“我的”页使用 iOS 26 原生 `UIGlassEffect` 构建轻量玻璃层次，播放器继续保留原有黑色渐变控制栏，避免 PlatformView 干扰视频与弹幕交互。首页仅保留必要的搜索或频道玻璃栏，不为内容区重复堆叠玻璃容器。
+
+底部导航参考 iOS/iPadOS 系统 Dock，使用局部 `BackdropFilter`、半透明白色高光层、细描边和柔和投影。Dock 会按设备逻辑短边等比缩放：小屏 iPhone 略微缩小，大屏 iPhone 与不同尺寸 iPad 逐级放大，同时保持系统安全区尺寸不变。iPad 竖屏使用底部 Dock；横屏使用紧凑的左侧图标 Dock，并将首页频道标签显示为短玻璃栏。
+
+毛玻璃模糊仅覆盖 Dock 本体，不处理整页或 IGL/Metal 视频纹理。AV1 VideoToolbox、IOSurface 零拷贝、弹幕和播放器控制链路不受影响。
+
 修改后的 media-kit 源码位于 `third_party/media-kit`，IGL Metal-only 源码位于 `third_party/igl`，可复现的 libmpv builder overlay 位于 `tool/libmpv-darwin-build`。仓库同时包含已验证 frameworks 归档，普通 checkout 不需要先本地重编 libmpv。
 
 使用 Xcode 自签名部署前，请在 `ios/Runner.xcworkspace` 中为 Runner 选择自己的 Development Team 和唯一 Bundle Identifier。未签名 IPA 需要由使用者通过 Xcode、个人证书或其他签名工具签名后才能安装。

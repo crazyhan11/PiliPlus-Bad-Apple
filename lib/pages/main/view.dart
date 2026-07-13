@@ -7,6 +7,7 @@ import 'package:PiliPlus/common/widgets/floating_navigation_bar.dart';
 import 'package:PiliPlus/common/widgets/flutter/pop_scope.dart';
 import 'package:PiliPlus/common/widgets/flutter/tabs.dart';
 import 'package:PiliPlus/common/widgets/image/network_img_layer.dart';
+import 'package:PiliPlus/common/widgets/ios_glass_surface.dart';
 import 'package:PiliPlus/common/widgets/route_aware_mixin.dart';
 import 'package:PiliPlus/models/common/nav_bar_config.dart';
 import 'package:PiliPlus/pages/home/view.dart';
@@ -285,7 +286,7 @@ class _MainAppState extends PopScopeState<MainApp>
   Widget? get _bottomNav {
     Widget? bottomNav;
     if (_mainController.navigationBars.length > 1) {
-      if (_mainController.floatingNavBar) {
+      if (IOSGlassSurface.isSupported || _mainController.floatingNavBar) {
         bottomNav = Obx(
           () => FloatingNavigationBar(
             onDestinationSelected: _mainController.setIndex,
@@ -340,6 +341,21 @@ class _MainAppState extends PopScopeState<MainApp>
         );
       }
 
+      if (IOSGlassSurface.isSupported) {
+        final glassTheme = theme.copyWith(
+          bottomNavigationBarTheme: theme.bottomNavigationBarTheme.copyWith(
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+          ),
+          navigationBarTheme: theme.navigationBarTheme.copyWith(
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            surfaceTintColor: Colors.transparent,
+          ),
+        );
+        bottomNav = Theme(data: glassTheme, child: bottomNav);
+      }
+
       if (_mainController.hideBottomBar) {
         if (_mainController.barOffset case final barOffset?) {
           return Obx(
@@ -371,45 +387,49 @@ class _MainAppState extends PopScopeState<MainApp>
   Widget _sideBar(ThemeData theme) {
     return _mainController.navigationBars.length > 1
         ? context.isTablet && _mainController.optTabletNav
-              ? Column(
-                  children: [
-                    const SizedBox(height: 25),
-                    userAndSearchVertical(theme),
-                    const Spacer(flex: 2),
-                    Expanded(
-                      flex: 5,
-                      child: SizedBox(
-                        width: 130,
-                        child: Obx(
-                          () => NavigationDrawer(
-                            backgroundColor: Colors.transparent,
-                            tilePadding: const .symmetric(
-                              vertical: 5,
-                              horizontal: 12,
-                            ),
-                            indicatorShape: const RoundedRectangleBorder(
-                              borderRadius: .all(.circular(16)),
-                            ),
-                            onDestinationSelected: _mainController.setIndex,
-                            selectedIndex: _mainController.selectedIndex.value,
-                            children: _mainController.navigationBars
-                                .map(
-                                  (e) => NavigationDrawerDestination(
-                                    label: Text(e.label),
-                                    icon: _buildIcon(type: e),
-                                    selectedIcon: _buildIcon(
-                                      type: e,
-                                      selected: true,
-                                    ),
+              ? IOSGlassSurface.isSupported
+                    ? _iosTabletSideDock(theme)
+                    : Column(
+                        children: [
+                          const SizedBox(height: 25),
+                          userAndSearchVertical(theme),
+                          const Spacer(flex: 2),
+                          Expanded(
+                            flex: 5,
+                            child: SizedBox(
+                              width: 130,
+                              child: Obx(
+                                () => NavigationDrawer(
+                                  backgroundColor: Colors.transparent,
+                                  tilePadding: const .symmetric(
+                                    vertical: 5,
+                                    horizontal: 12,
                                   ),
-                                )
-                                .toList(),
+                                  indicatorShape: const RoundedRectangleBorder(
+                                    borderRadius: .all(.circular(16)),
+                                  ),
+                                  onDestinationSelected:
+                                      _mainController.setIndex,
+                                  selectedIndex:
+                                      _mainController.selectedIndex.value,
+                                  children: _mainController.navigationBars
+                                      .map(
+                                        (e) => NavigationDrawerDestination(
+                                          label: Text(e.label),
+                                          icon: _buildIcon(type: e),
+                                          selectedIcon: _buildIcon(
+                                            type: e,
+                                            selected: true,
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
-                      ),
-                    ),
-                  ],
-                )
+                        ],
+                      )
               : Obx(
                   () => NavigationRail(
                     groupAlignment: 0.5,
@@ -433,6 +453,77 @@ class _MainAppState extends PopScopeState<MainApp>
             padding: const .only(top: 10),
             child: userAndSearchVertical(theme),
           );
+  }
+
+  Widget _iosTabletSideDock(ThemeData theme) {
+    final navigationHeight =
+        _mainController.navigationBars.length * 72.0 + 16.0;
+    final railTheme = theme.copyWith(
+      navigationRailTheme: theme.navigationRailTheme.copyWith(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        minWidth: 68,
+        useIndicator: true,
+      ),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+      child: Align(
+        alignment: Alignment.center,
+        child: IOSGlassSurface(
+          borderRadius: 28,
+          tintColor: const Color(0x18000000),
+          child: Theme(
+            data: railTheme,
+            child: SizedBox(
+              width: 76,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 12),
+                  userAndSearchVertical(theme),
+                  Divider(
+                    height: 17,
+                    indent: 14,
+                    endIndent: 14,
+                    color: theme.colorScheme.outlineVariant.withValues(
+                      alpha: 0.45,
+                    ),
+                  ),
+                  SizedBox(
+                    height: navigationHeight,
+                    child: Obx(
+                      () => NavigationRail(
+                        backgroundColor: Colors.transparent,
+                        groupAlignment: 0,
+                        minWidth: 68,
+                        labelType: NavigationRailLabelType.none,
+                        selectedIndex: _mainController.selectedIndex.value,
+                        onDestinationSelected: _mainController.setIndex,
+                        destinations: _mainController.navigationBars
+                            .map(
+                              (e) => NavigationRailDestination(
+                                label: Text(e.label),
+                                icon: _buildIcon(type: e),
+                                selectedIcon: _buildIcon(
+                                  type: e,
+                                  selected: true,
+                                ),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -461,11 +552,12 @@ class _MainAppState extends PopScopeState<MainApp>
       child = Row(
         children: [
           _sideBar(theme),
-          VerticalDivider(
-            width: 1,
-            endIndent: _padding.bottom,
-            color: theme.colorScheme.outline.withValues(alpha: 0.06),
-          ),
+          if (!(IOSGlassSurface.isSupported && context.isTablet))
+            VerticalDivider(
+              width: 1,
+              endIndent: _padding.bottom,
+              color: theme.colorScheme.outline.withValues(alpha: 0.06),
+            ),
           Expanded(child: child),
         ],
       );
@@ -474,7 +566,13 @@ class _MainAppState extends PopScopeState<MainApp>
     child = Scaffold(
       extendBody: true,
       resizeToAvoidBottomInset: false,
-      appBar: AppBar(toolbarHeight: 0),
+      backgroundColor: IOSGlassSurface.isSupported ? Colors.transparent : null,
+      appBar: AppBar(
+        toolbarHeight: 0,
+        backgroundColor: IOSGlassSurface.isSupported
+            ? Colors.transparent
+            : null,
+      ),
       body: Padding(
         padding: EdgeInsets.only(
           left: _mainController.useBottomNav ? _padding.left : 0.0,
@@ -484,6 +582,39 @@ class _MainAppState extends PopScopeState<MainApp>
       ),
       bottomNavigationBar: bottomNav,
     );
+
+    if (IOSGlassSurface.isSupported) {
+      final colorScheme = theme.colorScheme;
+      final glassTheme = theme.copyWith(
+        scaffoldBackgroundColor: Colors.transparent,
+        cardTheme: theme.cardTheme.copyWith(
+          color: colorScheme.surface.withValues(alpha: 0.72),
+          elevation: 0,
+        ),
+      );
+      child = DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              colorScheme.surface,
+              Color.lerp(
+                colorScheme.surface,
+                colorScheme.primaryContainer,
+                0.22,
+              )!,
+              Color.lerp(
+                colorScheme.surface,
+                colorScheme.tertiaryContainer,
+                0.16,
+              )!,
+            ],
+          ),
+        ),
+        child: Theme(data: glassTheme, child: child),
+      );
+    }
 
     if (PlatformUtils.isMobile) {
       child = AnnotatedRegion<SystemUiOverlayStyle>(
@@ -519,6 +650,7 @@ class _MainAppState extends PopScopeState<MainApp>
 
   Widget userAndSearchVertical(ThemeData theme) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         userAvatar(theme: theme, mainController: _mainController),
         const SizedBox(height: 8),

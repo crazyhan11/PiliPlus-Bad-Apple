@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'dart:ui' as ui;
+
+import 'package:PiliPlus/common/widgets/ios_glass_surface.dart';
 import 'package:PiliPlus/utils/extension/theme_ext.dart';
 import 'package:flutter/material.dart';
 
@@ -72,22 +75,28 @@ class FloatingNavigationBar extends StatelessWidget {
         navigationBarTheme.labelBehavior ??
         defaults.labelBehavior!;
 
+    final size = MediaQuery.sizeOf(context);
     final padding = MediaQuery.viewPaddingOf(context);
+    final useSystemFrostedDock = IOSGlassSurface.isSupported;
+    final dockScale = !useSystemFrostedDock
+        ? 1.0
+        : size.shortestSide >= 600
+        ? (1.12 * size.shortestSide / 744).clamp(1.08, 1.24).toDouble()
+        : (size.shortestSide / 390).clamp(0.92, 1.10).toDouble();
+    final isDark = Theme.brightnessOf(context) == Brightness.dark;
+    final colorScheme = Theme.of(context).colorScheme;
+    final borderSide = useSystemFrostedDock
+        ? BorderSide(
+            color: isDark ? const Color(0x48FFFFFF) : const Color(0xB8FFFFFF),
+            width: 0.75,
+          )
+        : defaults.borderSide;
 
-    return UnconstrainedBox(
-      child: Padding(
-        padding: .fromLTRB(
-          padding.left,
-          0,
-          padding.right,
-          bottomPadding + padding.bottom,
-        ),
-        child: SizedBox(
-          height: _kNavigationHeight,
-          width: destinations.length * _kIndicatorWidth,
-          child: DecoratedBox(
-            decoration: ShapeDecoration(
-              color: ElevationOverlay.applySurfaceTint(
+    Widget navigationSurface = DecoratedBox(
+      decoration: ShapeDecoration(
+        color: useSystemFrostedDock
+            ? null
+            : ElevationOverlay.applySurfaceTint(
                 backgroundColor ??
                     navigationBarTheme.backgroundColor ??
                     defaults.backgroundColor!,
@@ -98,41 +107,111 @@ class FloatingNavigationBar extends StatelessWidget {
                     navigationBarTheme.elevation ??
                     defaults.elevation!,
               ),
-              shape: RoundedSuperellipseBorder(
-                side: defaults.borderSide,
-                borderRadius: _kBorderRadius,
+        gradient: useSystemFrostedDock
+            ? LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: isDark
+                    ? [
+                        const Color(0x42FFFFFF),
+                        const Color(0x20FFFFFF),
+                        const Color(0x12FFFFFF),
+                      ]
+                    : [
+                        const Color(0x80FFFFFF),
+                        const Color(0x46FFFFFF),
+                        const Color(0x28FFFFFF),
+                      ],
+              )
+            : null,
+        shape: RoundedSuperellipseBorder(
+          side: borderSide,
+          borderRadius: _kBorderRadius,
+        ),
+      ),
+      child: Padding(
+        padding: _kIndicatorPadding,
+        child: Row(
+          crossAxisAlignment: .stretch,
+          children: <Widget>[
+            for (int i = 0; i < destinations.length; i++)
+              Expanded(
+                child: _SelectableAnimatedBuilder(
+                  duration: animationDuration,
+                  isSelected: i == selectedIndex,
+                  builder: (context, animation) {
+                    return _NavigationDestinationInfo(
+                      index: i,
+                      selectedIndex: selectedIndex,
+                      totalNumberOfDestinations: destinations.length,
+                      selectedAnimation: animation,
+                      labelBehavior: effectiveLabelBehavior,
+                      indicatorColor:
+                          indicatorColor ??
+                          (useSystemFrostedDock
+                              ? colorScheme.secondaryContainer.withValues(
+                                  alpha: 0.56,
+                                )
+                              : null),
+                      indicatorShape: indicatorShape,
+                      overlayColor: overlayColor,
+                      onTap: _handleTap(i),
+                      labelTextStyle: labelTextStyle,
+                      labelPadding: labelPadding,
+                      child: destinations[i],
+                    );
+                  },
+                ),
               ),
+          ],
+        ),
+      ),
+    );
+
+    if (useSystemFrostedDock) {
+      navigationSurface = ClipPath(
+        clipper: const ShapeBorderClipper(shape: _kNavigationShape),
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+          child: navigationSurface,
+        ),
+      );
+      navigationSurface = DecoratedBox(
+        decoration: ShapeDecoration(
+          color: Colors.transparent,
+          shape: const RoundedSuperellipseBorder(
+            borderRadius: _kBorderRadius,
+          ),
+          shadows: [
+            BoxShadow(
+              color: isDark ? const Color(0x24000000) : const Color(0x18000000),
+              blurRadius: 20,
+              spreadRadius: -4,
+              offset: const Offset(0, 7),
             ),
-            child: Padding(
-              padding: _kIndicatorPadding,
-              child: Row(
-                crossAxisAlignment: .stretch,
-                children: <Widget>[
-                  for (int i = 0; i < destinations.length; i++)
-                    Expanded(
-                      child: _SelectableAnimatedBuilder(
-                        duration: animationDuration,
-                        isSelected: i == selectedIndex,
-                        builder: (context, animation) {
-                          return _NavigationDestinationInfo(
-                            index: i,
-                            selectedIndex: selectedIndex,
-                            totalNumberOfDestinations: destinations.length,
-                            selectedAnimation: animation,
-                            labelBehavior: effectiveLabelBehavior,
-                            indicatorColor: indicatorColor,
-                            indicatorShape: indicatorShape,
-                            overlayColor: overlayColor,
-                            onTap: _handleTap(i),
-                            labelTextStyle: labelTextStyle,
-                            labelPadding: labelPadding,
-                            child: destinations[i],
-                          );
-                        },
-                      ),
-                    ),
-                ],
-              ),
+          ],
+        ),
+        child: navigationSurface,
+      );
+    }
+
+    return UnconstrainedBox(
+      child: Padding(
+        padding: .fromLTRB(
+          padding.left,
+          0,
+          padding.right,
+          bottomPadding * dockScale + padding.bottom,
+        ),
+        child: SizedBox(
+          height: _kNavigationHeight * dockScale,
+          width: destinations.length * _kIndicatorWidth * dockScale,
+          child: FittedBox(
+            fit: BoxFit.fill,
+            child: SizedBox(
+              height: _kNavigationHeight,
+              width: destinations.length * _kIndicatorWidth,
+              child: navigationSurface,
             ),
           ),
         ),

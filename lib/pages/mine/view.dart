@@ -5,6 +5,7 @@ import 'package:PiliPlus/common/style.dart';
 import 'package:PiliPlus/common/widgets/flutter/list_tile.dart';
 import 'package:PiliPlus/common/widgets/flutter/refresh_indicator.dart';
 import 'package:PiliPlus/common/widgets/image/network_img_layer.dart';
+import 'package:PiliPlus/common/widgets/ios_glass_surface.dart';
 import 'package:PiliPlus/http/loading_state.dart';
 import 'package:PiliPlus/models/common/nav_bar_config.dart';
 import 'package:PiliPlus/models_new/fav/fav_folder/list.dart';
@@ -68,6 +69,25 @@ class _MediaPageState extends CommonPageState<MinePage>
     super.build(context);
     final theme = Theme.of(context);
     final secondary = theme.colorScheme.secondary;
+    Widget profile = Column(
+      children: [
+        _buildUserInfo(theme, secondary),
+        _buildActions(secondary),
+      ],
+    );
+    if (IOSGlassSurface.isSupported) {
+      profile = Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        child: IOSGlassSurface(
+          borderRadius: 24,
+          tintColor: const Color(0x12000000),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: profile,
+          ),
+        ),
+      );
+    }
     return Column(
       children: [
         Padding(
@@ -84,8 +104,7 @@ class _MediaPageState extends CommonPageState<MinePage>
                   padding: const .only(bottom: 100),
                   physics: const AlwaysScrollableScrollPhysics(),
                   children: [
-                    _buildUserInfo(theme, secondary),
-                    _buildActions(secondary),
+                    profile,
                     Obx(
                       () => controller.loadingState.value is Loading
                           ? const SizedBox.shrink()
@@ -139,7 +158,7 @@ class _MediaPageState extends CommonPageState<MinePage>
     const iconSize = 22.0;
     const padding = EdgeInsets.all(8);
     const style = ButtonStyle(tapTargetSize: .shrinkWrap);
-    return Row(
+    final actions = Row(
       spacing: 5,
       mainAxisAlignment: .end,
       children: [
@@ -218,6 +237,20 @@ class _MediaPageState extends CommonPageState<MinePage>
         ),
         const SizedBox(width: 16),
       ],
+    );
+    if (!IOSGlassSurface.isSupported) {
+      return actions;
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      child: IOSGlassSurface(
+        borderRadius: 22,
+        tintColor: const Color(0x16000000),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: actions,
+        ),
+      ),
     );
   }
 

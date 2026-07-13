@@ -1,5 +1,6 @@
 import 'package:PiliPlus/common/widgets/avatars.dart';
 import 'package:PiliPlus/common/widgets/image/image_save.dart';
+import 'package:PiliPlus/common/widgets/ios_glass_surface.dart';
 import 'package:PiliPlus/http/loading_state.dart';
 import 'package:PiliPlus/models/dynamics/result.dart';
 import 'package:PiliPlus/pages/dynamics/widgets/action_panel.dart';
@@ -123,6 +124,21 @@ class DynamicPanel extends StatelessWidget {
     );
     if (isSave || (isDetail && !isDetailPortraitW)) {
       return child;
+    }
+    if (IOSGlassSurface.isSupported) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(10, 5, 10, 5),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface.withValues(alpha: 0.62),
+            borderRadius: const BorderRadius.all(Radius.circular(14)),
+            border: Border.all(
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.24),
+            ),
+          ),
+          child: child,
+        ),
+      );
     }
     return DecoratedBox(
       decoration: BoxDecoration(

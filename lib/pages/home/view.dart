@@ -1,11 +1,13 @@
 import 'package:PiliPlus/common/style.dart';
 import 'package:PiliPlus/common/widgets/custom_height_widget.dart';
 import 'package:PiliPlus/common/widgets/image/network_img_layer.dart';
+import 'package:PiliPlus/common/widgets/ios_glass_surface.dart';
 import 'package:PiliPlus/common/widgets/scroll_physics.dart';
 import 'package:PiliPlus/pages/common/common_page.dart';
 import 'package:PiliPlus/pages/home/controller.dart';
 import 'package:PiliPlus/pages/main/controller.dart';
 import 'package:PiliPlus/pages/mine/controller.dart';
+import 'package:PiliPlus/utils/extension/context_ext.dart';
 import 'package:PiliPlus/utils/extension/get_ext.dart';
 import 'package:PiliPlus/utils/extension/size_ext.dart';
 import 'package:PiliPlus/utils/feed_back.dart';
@@ -37,32 +39,50 @@ class _HomePageState extends CommonPageState<HomePage>
     final theme = Theme.of(context);
     Widget tabBar;
     if (_homeController.tabs.length > 1) {
+      Widget tabs = SizedBox(
+        height: 42,
+        width: double.infinity,
+        child: TabBar(
+          controller: _homeController.tabController,
+          tabs: _homeController.tabs.map((e) => Tab(text: e.label)).toList(),
+          isScrollable: true,
+          dividerColor: Colors.transparent,
+          dividerHeight: 0,
+          splashBorderRadius: Style.mdRadius,
+          tabAlignment: TabAlignment.center,
+          onTap: (_) {
+            feedBack();
+            if (!_homeController.tabController.indexIsChanging) {
+              _homeController.animateToTop();
+            }
+          },
+        ),
+      );
+      if (IOSGlassSurface.isSupported &&
+          context.isTablet &&
+          context.isLandscape) {
+        tabs = Align(
+          alignment: Alignment.center,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: IOSGlassSurface(
+              borderRadius: 22,
+              tintColor: const Color(0x16000000),
+              child: tabs,
+            ),
+          ),
+        );
+      }
       tabBar = Padding(
         padding: const EdgeInsets.only(top: 4),
-        child: SizedBox(
-          height: 42,
-          width: double.infinity,
-          child: TabBar(
-            controller: _homeController.tabController,
-            tabs: _homeController.tabs.map((e) => Tab(text: e.label)).toList(),
-            isScrollable: true,
-            dividerColor: Colors.transparent,
-            dividerHeight: 0,
-            splashBorderRadius: Style.mdRadius,
-            tabAlignment: TabAlignment.center,
-            onTap: (_) {
-              feedBack();
-              if (!_homeController.tabController.indexIsChanging) {
-                _homeController.animateToTop();
-              }
-            },
-          ),
-        ),
+        child: tabs,
       );
       if (_homeController.hideTopBar &&
           _mainController.barHideType == .instant) {
         tabBar = Material(
-          color: theme.colorScheme.surface,
+          color: IOSGlassSurface.isSupported
+              ? Colors.transparent
+              : theme.colorScheme.surface,
           child: tabBar,
         );
       }
@@ -89,7 +109,7 @@ class _HomePageState extends CommonPageState<HomePage>
 
   Widget customAppBar(ThemeData theme) {
     const padding = EdgeInsets.fromLTRB(14, 6, 14, 0);
-    final child = Row(
+    final controls = Row(
       children: [
         searchBar(theme),
         const SizedBox(width: 4),
@@ -97,6 +117,20 @@ class _HomePageState extends CommonPageState<HomePage>
         const SizedBox(width: 8),
         userAvatar(theme: theme, mainController: _mainController),
       ],
+    );
+    final glassBar = IOSGlassSurface(
+      borderRadius: 24,
+      tintColor: const Color(0x16000000),
+      child: IOSGlassSurface.isSupported
+          ? Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: controls,
+            )
+          : controls,
+    );
+    final child = Padding(
+      padding: padding,
+      child: glassBar,
     );
     if (_homeController.hideTopBar) {
       if (_mainController.barOffset case final barOffset?) {
@@ -106,10 +140,7 @@ class _HomePageState extends CommonPageState<HomePage>
             return CustomHeightWidget(
               offset: Offset(0, -offset),
               height: Style.topBarHeight - offset,
-              child: Padding(
-                padding: padding,
-                child: child,
-              ),
+              child: child,
             );
           },
         );
@@ -124,16 +155,14 @@ class _HomePageState extends CommonPageState<HomePage>
               curve: Curves.easeInOutCubicEmphasized,
               duration: const Duration(milliseconds: 500),
               height: showSearchBar ? Style.topBarHeight : 0,
-              padding: padding,
               child: child,
             ),
           );
         });
       }
     }
-    return Container(
+    return SizedBox(
       height: Style.topBarHeight,
-      padding: padding,
       child: child,
     );
   }
@@ -145,7 +174,9 @@ class _HomePageState extends CommonPageState<HomePage>
         height: 44,
         child: Material(
           borderRadius: borderRadius,
-          color: theme.colorScheme.onSecondaryContainer.withValues(alpha: 0.05),
+          color: IOSGlassSurface.isSupported
+              ? Colors.transparent
+              : theme.colorScheme.onSecondaryContainer.withValues(alpha: 0.05),
           child: InkWell(
             borderRadius: borderRadius,
             splashColor: theme.colorScheme.primaryContainer.withValues(
