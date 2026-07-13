@@ -1,0 +1,25 @@
+diff --git a/downloads.lock b/downloads.lock
+index ccad236..d243d43 100644
+--- a/downloads.lock
++++ b/downloads.lock
+@@ -8,7 +8,7 @@ ffmpeg:
+   sha256: 8646515b638a3ad303e23af6a3587734447cb8fc0a0c064ecdb8e95c4fd8b389
+ freetype:
+   version: 2.13.2
+-  url: https://downloads.sourceforge.net/project/freetype/freetype2/2.13.2/freetype-2.13.2.tar.xz
++  url: https://fosszone.csd.auth.gr/nongnu/freetype/freetype-2.13.2.tar.xz
+   sha256: 12991c4e55c506dd7f9b765933e62fd2be2e06d421505d7950a132e4f1bb484d
+ fribidi:
+   version: 1.0.13
+diff --git a/scripts/ffmpeg/meson.build b/scripts/ffmpeg/meson.build
+index 1b8afa3..d2cb1cb 100644
+--- a/scripts/ffmpeg/meson.build
++++ b/scripts/ffmpeg/meson.build
+@@ -254,6 +254,7 @@ video_default_options = [
+     '--enable-hwaccel=h263_videotoolbox',
+     '--enable-hwaccel=h264_videotoolbox',
+     '--enable-hwaccel=hevc_videotoolbox',
++    '--enable-hwaccel=av1_videotoolbox',
+     '--enable-hwaccel=mpeg1_videotoolbox',
+     '--enable-hwaccel=mpeg2_videotoolbox',
+     '--enable-hwaccel=mpeg4_videotoolbox',
