@@ -150,3 +150,46 @@ pili_release.json
 dist
 
 test*
+
+# IGL is vendored as a minimal Metal build dependency. Keep the runtime source
+# and licenses, but exclude upstream samples, tests, documentation and shells.
+third_party/igl/build/
+third_party/igl/.claude/
+third_party/igl/.github/
+third_party/igl/docs/
+third_party/igl/samples/
+third_party/igl/shell/
+third_party/igl/IGLU/
+third_party/igl/CODE_OF_CONDUCT.md
+third_party/igl/CONTRIBUTING.md
+third_party/igl/ROADMAP.md
+third_party/igl/deploy_content.py
+third_party/igl/deploy_deps.py
+third_party/igl/getting-started.md
+third_party/igl/src/igl/android/
+third_party/igl/src/igl/d3d12/
+third_party/igl/src/igl/glslang/
+third_party/igl/src/igl/vulkan/
+third_party/igl/src/igl/win/
+third_party/igl/src/igl/tests/
+third_party/igl/src/igl/opengl/*
+!third_party/igl/src/igl/opengl/util/
+!third_party/igl/src/igl/opengl/util/**
+!third_party/igl/src/igl/vulkan/
+third_party/igl/src/igl/vulkan/*
+!third_party/igl/src/igl/vulkan/util/
+third_party/igl/src/igl/vulkan/util/*
+!third_party/igl/src/igl/vulkan/util/TextureFormat.cpp
+!third_party/igl/src/igl/vulkan/util/TextureFormat.h
+third_party/igl/third-party/*
+!third_party/igl/third-party/deps/
+third_party/igl/third-party/deps/*
+!third_party/igl/third-party/deps/src/
+!third_party/igl/third-party/deps/src/**
+third_party/igl/third-party/deps/src/fmt/.github/
+third_party/igl/third-party/deps/src/fmt/ChangeLog.md
+third_party/igl/third-party/deps/src/fmt/doc/
+third_party/igl/third-party/deps/src/fmt/support/
+third_party/igl/third-party/deps/src/fmt/test/
+third_party/igl/third-party/deps/src/ldrutils/.github/
+third_party/igl/third-party/deps/src/ldrutils/tests/

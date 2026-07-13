@@ -1,0 +1,260 @@
+diff --git a/include/mpv/render.h b/include/mpv/render.h
+index 1d2218b..451bad0 100644
+--- a/include/mpv/render.h
++++ b/include/mpv/render.h
+@@ -158,6 +158,37 @@ extern "C" {
+  */
+ typedef struct mpv_render_context mpv_render_context;
+
++/**
++ * A VideoToolbox frame exposed by MPV_RENDER_API_TYPE_CVPIXELBUFFER.
++ *
++ * pixel_buffer is a CVPixelBufferRef. It is borrowed and remains valid only
++ * for the duration of mpv_render_cvpixelbuffer_fn. The API deliberately uses
++ * void* so this public header does not require Apple framework headers.
++ */
++typedef struct mpv_render_cvpixelbuffer_frame {
++    void *pixel_buffer;
++    int width;
++    int height;
++    int display_width;
++    int display_height;
++    int crop_x0;
++    int crop_y0;
++    int crop_x1;
++    int crop_y1;
++    int rotate;
++    double pts;
++} mpv_render_cvpixelbuffer_frame;
++
++/**
++ * Render a borrowed VideoToolbox frame into a host-owned target.
++ *
++ * Returning 0 reports success. A negative value aborts this render call.
++ * The callback is invoked synchronously by mpv_render_context_render().
++ */
++typedef int (*mpv_render_cvpixelbuffer_fn)(
++    void *callback_ctx,
++    const mpv_render_cvpixelbuffer_frame *frame);
++
+ /**
+  * Parameters for mpv_render_param (which is used in a few places such as
+  * mpv_render_context_create().
+@@ -417,4 +448,23 @@ typedef enum mpv_render_param_type {
+      * See MPV_RENDER_PARAM_SW_STRIDE for alignment requirements.
+      */
+     MPV_RENDER_PARAM_SW_POINTER = 20,
++    /**
++     * MPV_RENDER_API_TYPE_CVPIXELBUFFER only: synchronous render callback.
++     * Valid for mpv_render_context_render().
++     * Type: mpv_render_cvpixelbuffer_fn*
++     */
++    MPV_RENDER_PARAM_CVPIXELBUFFER_CALLBACK = 21,
++    /**
++     * MPV_RENDER_API_TYPE_CVPIXELBUFFER only: callback context.
++     * Valid for mpv_render_context_render(). The value itself is passed to
++     * mpv_render_cvpixelbuffer_fn and may be NULL.
++     * Type: void*
++     */
++    MPV_RENDER_PARAM_CVPIXELBUFFER_CALLBACK_CTX = 22,
++    /**
++     * MPV_RENDER_API_TYPE_CVPIXELBUFFER only: host target dimensions.
++     * Valid for mpv_render_context_render().
++     * Type: int[2]
++     */
++    MPV_RENDER_PARAM_CVPIXELBUFFER_SIZE = 23,
+ } mpv_render_param_type;
+@@ -467,6 +517,8 @@ typedef struct mpv_render_param {
+ #define MPV_RENDER_API_TYPE_OPENGL "opengl"
+ // See section "Software renderer"
+ #define MPV_RENDER_API_TYPE_SW "sw"
++// Apple VideoToolbox frame callback renderer.
++#define MPV_RENDER_API_TYPE_CVPIXELBUFFER "cvpixelbuffer"
+
+ /**
+  * Flags used in mpv_render_frame_info.flags. Each value represents a bit in it.
+diff --git a/meson.build b/meson.build
+index 7ebc844..77fd88e 100644
+--- a/meson.build
++++ b/meson.build
+@@ -248,5 +248,6 @@ sources = files(
+     'video/out/gpu/video.c',
+     'video/out/gpu/video_shaders.c',
+     'video/out/libmpv_sw.c',
++    'video/out/libmpv_cvpixelbuffer.c',
+     'video/out/vo.c',
+     'video/out/vo_gpu.c',
+diff --git a/video/out/libmpv.h b/video/out/libmpv.h
+index ac52ada..af93b20 100644
+--- a/video/out/libmpv.h
++++ b/video/out/libmpv.h
+@@ -75,3 +75,4 @@ struct render_backend_fns {
+
+ extern const struct render_backend_fns render_backend_gpu;
+ extern const struct render_backend_fns render_backend_sw;
++extern const struct render_backend_fns render_backend_cvpixelbuffer;
+diff --git a/video/out/vo_libmpv.c b/video/out/vo_libmpv.c
+index 1661b10..ca4f94a 100644
+--- a/video/out/vo_libmpv.c
++++ b/video/out/vo_libmpv.c
+@@ -113,6 +113,7 @@ struct mpv_render_context {
+
+ const struct render_backend_fns *render_backends[] = {
+     &render_backend_gpu,
++    &render_backend_cvpixelbuffer,
+     &render_backend_sw,
+     NULL
+ };
+diff --git a/video/out/libmpv_cvpixelbuffer.c b/video/out/libmpv_cvpixelbuffer.c
+new file mode 100644
+index 0000000..83e2c66
+--- /dev/null
++++ b/video/out/libmpv_cvpixelbuffer.c
+@@ -0,0 +1,147 @@
++#include "config.h"
++
++#include <libavutil/hwcontext.h>
++
++#include "mpv/render.h"
++#include "libmpv.h"
++#include "video/hwdec.h"
++#include "video/img_format.h"
++#include "video/mp_image.h"
++
++struct priv {
++    struct mp_image_params params;
++    struct mp_hwdec_ctx hwctx;
++};
++
++static int init(struct render_backend *ctx, mpv_render_param *params)
++{
++    char *api = get_mpv_render_param(params, MPV_RENDER_PARAM_API_TYPE, NULL);
++    if (!api)
++        return MPV_ERROR_INVALID_PARAMETER;
++    if (strcmp(api, MPV_RENDER_API_TYPE_CVPIXELBUFFER) != 0)
++        return MPV_ERROR_NOT_IMPLEMENTED;
++#if !HAVE_DARWIN
++    return MPV_ERROR_NOT_IMPLEMENTED;
++#else
++    struct priv *p = ctx->priv = talloc_zero(NULL, struct priv);
++    ctx->hwdec_devs = hwdec_devices_create();
++    p->hwctx = (struct mp_hwdec_ctx) {
++        .driver_name = "videotoolbox-cvpixelbuffer",
++        .hw_imgfmt = IMGFMT_VIDEOTOOLBOX,
++    };
++    int ret = av_hwdevice_ctx_create(&p->hwctx.av_device_ref,
++                                     AV_HWDEVICE_TYPE_VIDEOTOOLBOX,
++                                     NULL, NULL, 0);
++    if (ret < 0) {
++        hwdec_devices_destroy(ctx->hwdec_devs);
++        ctx->hwdec_devs = NULL;
++        return MPV_ERROR_GENERIC;
++    }
++    hwdec_devices_add(ctx->hwdec_devs, &p->hwctx);
++    ctx->driver_caps = VO_CAP_ROTATE90 | VO_CAP_VFLIP;
++    return 0;
++#endif
++}
++
++static bool check_format(struct render_backend *ctx, int imgfmt)
++{
++    return imgfmt == IMGFMT_VIDEOTOOLBOX;
++}
++
++static int set_parameter(struct render_backend *ctx, mpv_render_param param)
++{
++    return MPV_ERROR_NOT_IMPLEMENTED;
++}
++
++static void reconfig(struct render_backend *ctx, struct mp_image_params *params)
++{
++    struct priv *p = ctx->priv;
++    p->params = *params;
++}
++
++static void reset(struct render_backend *ctx)
++{
++}
++
++static void update_external(struct render_backend *ctx, struct vo *vo)
++{
++}
++
++static void resize(struct render_backend *ctx, struct mp_rect *src,
++                   struct mp_rect *dst, struct mp_osd_res *osd)
++{
++}
++
++static int get_target_size(struct render_backend *ctx, mpv_render_param *params,
++                           int *out_w, int *out_h)
++{
++    int *size = get_mpv_render_param(
++        params, MPV_RENDER_PARAM_CVPIXELBUFFER_SIZE, NULL);
++    if (!size || size[0] <= 0 || size[1] <= 0)
++        return MPV_ERROR_INVALID_PARAMETER;
++    *out_w = size[0];
++    *out_h = size[1];
++    return 0;
++}
++
++static int render(struct render_backend *ctx, mpv_render_param *params,
++                  struct vo_frame *frame)
++{
++    mpv_render_cvpixelbuffer_fn *callback_ptr = get_mpv_render_param(
++        params, MPV_RENDER_PARAM_CVPIXELBUFFER_CALLBACK, NULL);
++    if (!callback_ptr || !*callback_ptr)
++        return MPV_ERROR_INVALID_PARAMETER;
++
++    void *callback_ctx = get_mpv_render_param(
++        params, MPV_RENDER_PARAM_CVPIXELBUFFER_CALLBACK_CTX, NULL);
++    mpv_render_cvpixelbuffer_frame native = {0};
++    struct mp_image *image = frame ? frame->current : NULL;
++    if (image) {
++        if (image->imgfmt != IMGFMT_VIDEOTOOLBOX || !image->planes[3])
++            return MPV_ERROR_UNSUPPORTED;
++
++        int display_w = image->w;
++        int display_h = image->h;
++        mp_image_params_get_dsize(&image->params, &display_w, &display_h);
++        native = (mpv_render_cvpixelbuffer_frame) {
++            .pixel_buffer = image->planes[3],
++            .width = image->w,
++            .height = image->h,
++            .display_width = display_w,
++            .display_height = display_h,
++            .crop_x0 = image->params.crop.x0,
++            .crop_y0 = image->params.crop.y0,
++            .crop_x1 = image->params.crop.x1,
++            .crop_y1 = image->params.crop.y1,
++            .rotate = image->params.rotate,
++            .pts = image->pts,
++        };
++    }
++
++    int result = (*callback_ptr)(callback_ctx, &native);
++    return result < 0 ? result : 0;
++}
++
++static void destroy(struct render_backend *ctx)
++{
++    struct priv *p = ctx->priv;
++    if (ctx->hwdec_devs && p) {
++        hwdec_devices_remove(ctx->hwdec_devs, &p->hwctx);
++        av_buffer_unref(&p->hwctx.av_device_ref);
++        hwdec_devices_destroy(ctx->hwdec_devs);
++        ctx->hwdec_devs = NULL;
++    }
++}
++
++const struct render_backend_fns render_backend_cvpixelbuffer = {
++    .init = init,
++    .check_format = check_format,
++    .set_parameter = set_parameter,
++    .reconfig = reconfig,
++    .reset = reset,
++    .update_external = update_external,
++    .resize = resize,
++    .get_target_size = get_target_size,
++    .render = render,
++    .destroy = destroy,
++};

@@ -1,8 +1,8 @@
-# This archive is rebuilt from melodink-libmpv-darwin-build v0.39.0 with
-# FFmpeg's av1_videotoolbox hwaccel enabled. Keeping it in this fork makes
-# Flutter dependency resolution reproducible without requiring a local build.
-AV1_XCFRAMEWORKS_ARCHIVE=vendor/libmpv-xcframeworks_v0.39.0-av1-vt_ios-universal-video-default.tar.gz
-AV1_XCFRAMEWORKS_STAMP=Frameworks/.av1-videotoolbox-extracted
+# Device slices use mpv 0.41, FFmpeg 8, VideoToolbox AV1 and the custom
+# CVPixelBuffer Render API. Simulator slices remain compatible legacy slices.
+# SHA-256: d70a2a7b412a972f5cf7263e39155e43ff9863948f7f2a0322936a6fb3c4de56
+AV1_XCFRAMEWORKS_ARCHIVE=vendor/libmpv-xcframeworks_v0.41.0-ffmpeg8-av1-vt-cvpixelbuffer_igl_ios-universal-video-default.tar.gz
+AV1_XCFRAMEWORKS_STAMP=Frameworks/.igl-metal-av1-videotoolbox-extracted
 
 ifneq ($(wildcard ${AV1_XCFRAMEWORKS_ARCHIVE}),)
 all: Frameworks/.symlinks

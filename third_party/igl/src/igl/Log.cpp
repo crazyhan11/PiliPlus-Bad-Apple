@@ -1,0 +1,101 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+#define IGL_COMMON_SKIP_CHECK
+
+#include <cstdarg>
+#include <cstdio>
+#include <mutex>
+#include <string>
+#include <unordered_set>
+#include <igl/Core.h>
+
+#if IGL_PLATFORM_ANDROID
+#include <igl/android/LogDefault.h>
+#elif IGL_PLATFORM_IOS
+#include <igl/apple/LogDefault.h>
+#elif IGL_PLATFORM_WINDOWS
+#include <igl/win/LogDefault.h>
+#endif
+
+namespace {
+IGLLogHandlerFunc* getHandle() {
+#if IGL_PLATFORM_ANDROID
+  static IGLLogHandlerFunc sHandler = IGLAndroidLogDefaultHandler;
+#elif IGL_PLATFORM_IOS
+  static IGLLogHandlerFunc sHandler = IGLAppleLogDefaultHandler;
+#elif IGL_PLATFORM_WINDOWS
+  static IGLLogHandlerFunc sHandler = IGLWinLogDefaultHandler;
+#else
+  static IGLLogHandlerFunc sHandler = IGLLogDefaultHandler;
+#endif
+  return &sHandler;
+}
+} // namespace
+
+IGL_API int IGLLog(IGLLogLevel logLevel, const char* IGL_RESTRICT format, ...) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  va_list ap;
+  va_start(ap, format);
+  const int result = IGLLogV(logLevel, format, ap);
+  va_end(ap);
+  return result;
+}
+
+IGL_API int IGLLogOnce(IGLLogLevel logLevel, const char* IGL_RESTRICT format, ...) {
+  // NOLINTNEXTLINE(facebook-static-object-destructor-check)
+  static std::mutex sLoggedMessagesMutex;
+  // NOLINTNEXTLINE(facebook-static-object-destructor-check)
+  static std::unordered_set<std::string> sLoggedMessages;
+
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  va_list ap, apCopy;
+  va_start(ap, format);
+  va_copy(apCopy, ap); // make a copy for later passing to IGLLogV()
+
+  constexpr size_t bufferLength = 256;
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays)
+  char buffer[bufferLength]; // uninitialized
+  FOLLY_PUSH_WARNING
+  FOLLY_GNU_DISABLE_WARNING("-Wformat-nonliteral")
+  int result = vsnprintf(buffer, bufferLength, format, ap);
+  FOLLY_POP_WARNING
+  va_end(ap);
+
+  const std::string msg(buffer);
+  {
+    const std::lock_guard<std::mutex> guard(sLoggedMessagesMutex);
+    if (sLoggedMessages.count(msg) == 0) {
+      result = IGLLogV(logLevel, format, apCopy);
+      sLoggedMessages.insert(msg);
+    }
+  }
+  va_end(apCopy);
+
+  return result;
+}
+
+IGL_API int IGLLogV(IGLLogLevel logLevel, const char* IGL_RESTRICT format, va_list ap) {
+  return (*getHandle())(logLevel, format, ap);
+}
+
+IGL_API int IGLLogDefaultHandler(IGLLogLevel /*logLevel*/,
+                                 const char* IGL_RESTRICT format,
+                                 va_list ap) {
+  FOLLY_PUSH_WARNING
+  FOLLY_GNU_DISABLE_WARNING("-Wformat-nonliteral")
+  return vfprintf(stderr, format, ap);
+  FOLLY_POP_WARNING
+}
+
+IGL_API void IGLLogSetHandler(IGLLogHandlerFunc handler) {
+  *getHandle() = handler;
+}
+
+IGL_API IGLLogHandlerFunc IGLLogGetHandler() {
+  return *getHandle();
+}

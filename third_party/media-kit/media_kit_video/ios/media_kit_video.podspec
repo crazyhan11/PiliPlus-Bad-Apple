@@ -32,14 +32,20 @@ Pod::Spec.new do |s|
     framework_search_paths_iphoneos        = sprintf('$(PROJECT_DIR)/../.symlinks/plugins/%s/ios/Frameworks/.symlinks/mpv/ios', mku.libs_package)
     framework_search_paths_iphonesimulator = sprintf('$(PROJECT_DIR)/../.symlinks/plugins/%s/ios/Frameworks/.symlinks/mpv/ios-simulator', mku.libs_package)
 
-    s.source_files        = 'Classes/plugin/**/*.swift', 'Headers/**/*.h'
+    s.source_files        = 'Classes/plugin/**/*.{swift,h,mm}', 'Headers/**/*.h'
+    s.public_header_files = 'Classes/plugin/igl/IGLMetalTexture.h', 'Headers/**/*.h'
+    s.vendored_libraries  = 'vendor/igl/libIGLMetal.a'
+    s.frameworks          = 'Metal', 'CoreVideo', 'IOSurface'
+    s.preserve_paths      = '../../../igl/src/**/*', '../../../igl/third-party/deps/src/{fmt,ldrutils}/**/*'
     s.pod_target_xcconfig = {
       'DEFINES_MODULE'                               => 'YES',
       'GCC_WARN_INHIBIT_ALL_WARNINGS'                => 'YES',
-      'GCC_PREPROCESSOR_DEFINITIONS'                 => '"$(inherited)" GL_SILENCE_DEPRECATION COREVIDEO_SILENCE_GL_DEPRECATION',
+      'GCC_PREPROCESSOR_DEFINITIONS'                 => '"$(inherited)" IGL_CMAKE_BUILD=1 GL_SILENCE_DEPRECATION COREVIDEO_SILENCE_GL_DEPRECATION',
+      'CLANG_CXX_LANGUAGE_STANDARD'                  => 'c++20',
+      'HEADER_SEARCH_PATHS'                          => '"$(inherited)" "${PODS_ROOT}/../../third_party/igl/src" "${PODS_ROOT}/../../third_party/igl/third-party/deps/src" "${PODS_ROOT}/../../third_party/igl/third-party/deps/src/fmt/include"',
       'FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]'        => sprintf('"$(inherited)" "%s"', framework_search_paths_iphoneos),
       'FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]' => sprintf('"$(inherited)" "%s"', framework_search_paths_iphonesimulator),
-      'OTHER_LDFLAGS'                                => '"$(inherited)" -framework Mpv',
+      'OTHER_LDFLAGS'                                => '"$(inherited)" -framework Mpv -lc++ -framework Metal -framework CoreVideo -framework IOSurface',
       # Flutter.framework does not contain a i386 slice.
       'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386',
     }

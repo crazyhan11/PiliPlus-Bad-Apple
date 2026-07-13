@@ -1,0 +1,24 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+#include <igl/metal/ios/Framebuffer.h>
+
+#import <Metal/MTLResource.h>
+#import <Metal/MTLTexture.h>
+
+namespace igl::metal::ios {
+
+// @fb-only
+Framebuffer::Framebuffer(const FramebufferDesc& value) : metal::Framebuffer(value) {}
+
+bool Framebuffer::canCopy(ICommandQueue& /* unused */,
+                          id<MTLTexture> texture,
+                          const TextureRangeDesc& /*range*/) const {
+  return texture.storageMode == MTLStorageModeShared;
+}
+
+} // namespace igl::metal::ios

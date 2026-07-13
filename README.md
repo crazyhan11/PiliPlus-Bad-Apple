@@ -25,18 +25,41 @@
 
 <br/>
 
-## iOS AV1 VideoToolbox 版本
+## PiliPlus Bad Apple: iOS AV1 + IGL Metal
 
-此分支在保留原版 Flutter 界面、弹幕和 mpv 播放器的基础上，为 iOS 增加：
+此分支保留原版 Flutter 界面、弹幕、mpv 网络/DASH/缓存/音频/时钟能力，并为 iOS 增加：
 
-- FFmpeg `av1_videotoolbox` 硬件解码支持
-- iOS 优先使用 VideoToolbox，并保留不兼容视频的解码回退
+- FFmpeg 8 `av1_videotoolbox` 硬件解码
+- mpv `cvpixelbuffer` Render API，直接借用 VideoToolbox `CVPixelBuffer`
+- IGL 原生 Metal 渲染，支持 NV12/P010、BT.601/709/2020、full/video range、crop 与旋转
+- IOSurface-backed BGRA 三缓冲，GPU completion 后异步交帧给 Flutter Impeller
+- IGL 初始化失败时自动回退原 OpenGL ES 路径，并保留具体失败日志
 - 播放信息中的硬件解码诊断字段
 - iPhone 横屏全屏安全区黑边修复，不强制裁剪视频画面
 
-已在 iPad mini (A17 Pro) 和 iPhone 12 mini 真机验证。工程当前最低目标为 iOS 26.0。修改后的 media-kit 源码和已验证的 AV1 框架位于 `third_party/media-kit`，框架源码补丁与重建脚本位于 `tool/`。
+当前像素路径为：
 
-使用 Xcode 自签名部署前，请在 `ios/Runner.xcworkspace` 中为 Runner 选择自己的 Development Team 和唯一 Bundle Identifier。
+```text
+VideoToolbox CVPixelBuffer
+  -> IGL Metal YUV/P010 shader
+  -> IOSurface-backed BGRA CVPixelBuffer
+  -> Flutter CVMetalTextureCache
+  -> Impeller TextureMTL wrapper
+```
+
+`copyPixelBuffer` 只 retain IOSurface-backed `CVPixelBuffer`。Flutter 随后通过 `CVMetalTextureCacheCreateTextureFromImage` 包装同一块 IOSurface，不发生 GPU -> CPU -> GPU 像素复制。详细设计、诊断日志、验证结果和后续定制 Flutter Engine 路线见 [iOS IGL Metal 架构](docs/ios-igl-metal.md)。
+
+已在 iPad mini (A17 Pro) 与 iPhone 12 mini 真机验证；目标内容包括 4K AV1、横竖屏、全屏、拖动、暂停/恢复和多尺寸切换。工程当前最低目标为 iOS 26.0。
+
+修改后的 media-kit 源码位于 `third_party/media-kit`，IGL Metal-only 源码位于 `third_party/igl`，可复现的 libmpv builder overlay 位于 `tool/libmpv-darwin-build`。仓库同时包含已验证 frameworks 归档，普通 checkout 不需要先本地重编 libmpv。
+
+使用 Xcode 自签名部署前，请在 `ios/Runner.xcworkspace` 中为 Runner 选择自己的 Development Team 和唯一 Bundle Identifier。未签名 IPA 需要由使用者通过 Xcode、个人证书或其他签名工具签名后才能安装。
+
+生成未签名 Release IPA：
+
+```bash
+FLUTTER_BIN=/path/to/flutter tool/package_ios_unsigned.sh
+```
 
 ## 适配平台
 

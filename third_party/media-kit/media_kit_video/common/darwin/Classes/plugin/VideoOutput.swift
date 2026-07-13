@@ -34,6 +34,8 @@ public class VideoOutput: NSObject {
   private var texture: ResizableTextureProtocol!
   private var textureId: Int64 = -1
   private var currentSize: CGSize = CGSize.zero
+  private var zeroSizeUpdateCount: Int = 0
+  private var asynchronousFrameDelivery: Bool = false
   private var disposed: Bool = false
 
   init(
@@ -88,18 +90,50 @@ public class VideoOutput: NSObject {
     }
 
     if enableHardwareAcceleration {
-      texture = SafeResizableTexture(
-        TextureHW(
-          handle: handle,
-          // Use `weak self` to prevent memory leaks
+      #if canImport(Flutter) && !targetEnvironment(simulator)
+        var iglError: NSString?
+        if let iglTexture = IGLMetalTexture(
+          handle: UnsafeMutableRawPointer(handle),
           updateCallback: { [weak self]() in
-            guard let that = self else {
-              return
-            }
+            guard let that = self else { return }
             that.updateCallback()
-          }
+          },
+          frameReadyCallback: { [weak self]() in
+            guard let that = self else { return }
+            that.notifyTextureFrameAvailable()
+          },
+          error: &iglError
+        ) {
+          NSLog(
+            "VideoOutput: renderer: \(iglTexture.rendererDescription)"
+          )
+          asynchronousFrameDelivery = true
+          texture = SafeResizableTexture(iglTexture)
+        } else {
+          NSLog(
+            "VideoOutput: IGL Metal unavailable, falling back to OpenGL ES: \(iglError ?? "unknown")"
+          )
+          texture = SafeResizableTexture(
+            TextureHW(
+              handle: handle,
+              updateCallback: { [weak self]() in
+                guard let that = self else { return }
+                that.updateCallback()
+              }
+            )
+          )
+        }
+      #else
+        texture = SafeResizableTexture(
+          TextureHW(
+            handle: handle,
+            updateCallback: { [weak self]() in
+              guard let that = self else { return }
+              that.updateCallback()
+            }
+          )
         )
-      )
+      #endif
     } else {
       texture = SafeResizableTexture(
         TextureSW(
@@ -151,8 +185,13 @@ public class VideoOutput: NSObject {
     let size = videoSize
 
     if size.width == 0 || size.height == 0 {
+      zeroSizeUpdateCount += 1
+      if zeroSizeUpdateCount <= 3 {
+        NSLog("VideoOutput: update #\(zeroSizeUpdateCount) has zero video size")
+      }
       return
     }
+    zeroSizeUpdateCount = 0
 
     if currentSize != size {
       currentSize = size
@@ -170,10 +209,19 @@ public class VideoOutput: NSObject {
     }
 
     texture.render(size)
-    DispatchQueue.main.sync { [weak self] in
-      guard let that = self else { return }
-      // Textures must be marked as available from the main thread
-      that.registry.textureFrameAvailable(that.textureId)
+    if !asynchronousFrameDelivery {
+      DispatchQueue.main.sync { [weak self] in
+        guard let that = self else { return }
+        // Textures must be marked as available from the main thread
+        that.registry.textureFrameAvailable(that.textureId)
+      }
+    }
+  }
+
+  private func notifyTextureFrameAvailable() {
+    dispatchPrecondition(condition: .onQueue(.main))
+    if !disposed && textureId >= 0 {
+      registry.textureFrameAvailable(textureId)
     }
   }
 
