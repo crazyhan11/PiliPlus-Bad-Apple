@@ -25,14 +25,16 @@
 
 <br/>
 
-## PiliPlus Bad Apple: iOS AV1 + IGL Metal
+## PiliPlus Bad Apple: Apple 原生视频与弹幕
 
-此分支保留原版 Flutter 界面、弹幕、mpv 网络/DASH/缓存/音频/时钟能力，并为 iOS 增加：
+此分支保留原版 Flutter 界面以及 mpv 网络/DASH/缓存/音频能力，并为 iOS 和 macOS 增加 Apple 原生播放路径：
 
 - FFmpeg 8 `av1_videotoolbox` 硬件解码
 - mpv `cvpixelbuffer` Render API，直接借用 VideoToolbox `CVPixelBuffer`
-- IGL 原生 Metal 渲染，支持 NV12/P010、BT.601/709/2020、full/video range、crop 与旋转
-- IOSurface-backed BGRA 三缓冲，GPU completion 后异步交帧给 Flutter Impeller
+- SDR NV12/P010 与 HDR BT.2020 PQ/HLG 帧交给独立 `AVSampleBufferDisplayLayer`
+- 视频时钟使用真实 mpv PTS 与 `AVSampleBufferRenderSynchronizer`，支持暂停恢复和原生倍速
+- 普通、固定及特殊弹幕由 CoreAnimation 原生层呈现，Flutter 保留 SDR 界面、字幕与控制
+- contain/cover/fill、裁剪、旋转及平台视图生命周期分别适配 AppKit 与 UIKit
 - IGL 初始化失败时自动回退原 OpenGL ES 路径，并保留具体失败日志
 - 播放信息中的硬件解码诊断字段
 - iPhone 横屏全屏安全区黑边修复，不强制裁剪视频画面
@@ -41,15 +43,14 @@
 
 ```text
 VideoToolbox CVPixelBuffer
-  -> IGL Metal YUV/P010 shader
-  -> IOSurface-backed BGRA CVPixelBuffer
-  -> Flutter CVMetalTextureCache
-  -> Impeller TextureMTL wrapper
+  -> mpv cvpixelbuffer Render API
+  -> AVSampleBufferDisplayLayer (SDR/HDR video)
+  -> Flutter SDR UI, subtitles and controls
 ```
 
-`copyPixelBuffer` 只 retain IOSurface-backed `CVPixelBuffer`。Flutter 随后通过 `CVMetalTextureCacheCreateTextureFromImage` 包装同一块 IOSurface，不发生 GPU -> CPU -> GPU 像素复制。详细设计、诊断日志、验证结果和后续定制 Flutter Engine 路线见 [iOS IGL Metal 架构](docs/ios-igl-metal.md)。
+原生呈现不可用时仍保留 IGL Metal/FlutterTexture 回退。详细的早期架构和诊断记录见 [iOS IGL Metal 架构](docs/ios-igl-metal.md)。
 
-已在 iPad mini (A17 Pro) 与 iPhone 12 mini 真机验证；目标内容包括 4K AV1、横竖屏、全屏、拖动、暂停/恢复和多尺寸切换。工程当前最低目标为 iOS 26.0。
+macOS 当前最低目标为 macOS 14，已验证普通 SDR 播放、音频、窗口/全屏、暂停恢复、2 倍速、原生弹幕和 HDR 输出。iOS 当前最低目标为 iOS 26，发布包为无签名 IPA；HDR 输出也已经过真机验证，最新代码包含返回主页的原生平台视图生命周期修复。两端采用原生视频与 CoreAnimation 弹幕后，用户实测功耗均显著下降；不同机型、显示器和片源仍可能产生差异。
 
 ### iOS 26 Liquid Glass
 
@@ -76,6 +77,7 @@ FLUTTER_BIN=/path/to/flutter tool/package_ios_unsigned.sh
 - [x] Pad
 - [x] Windows
 - [x] Linux
+- [x] macOS 14+
 
 [![Packaging status](https://repology.org/badge/vertical-allrepos/piliplus.svg)](https://repology.org/project/piliplus/versions)
 

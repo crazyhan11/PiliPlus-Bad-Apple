@@ -141,7 +141,7 @@ class NativeVideoController extends PlatformVideoController {
 
   @override
   Future<void>? setNativeVideoSurface({Rect? rect, String fit = 'contain'}) {
-    if (!Platform.isMacOS) {
+    if (!Platform.isMacOS && !Platform.isIOS) {
       return null;
     }
     return _channel.invokeMethod('VideoOutputManager.SetNativeSurface', {
@@ -160,7 +160,7 @@ class NativeVideoController extends PlatformVideoController {
 
   @override
   Future<void>? setNativeVideoPlaybackRate(double rate) {
-    if (!Platform.isMacOS) {
+    if (!Platform.isMacOS && !Platform.isIOS) {
       return null;
     }
     return _channel.invokeMethod('VideoOutputManager.SetNativePlaybackRate', {

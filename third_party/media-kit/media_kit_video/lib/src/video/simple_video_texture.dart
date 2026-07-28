@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 class SimpleVideo extends StatefulWidget {
@@ -9,6 +12,7 @@ class SimpleVideo extends StatefulWidget {
   final VideoController controller;
   final double? aspectRatio;
   final FilterQuality filterQuality;
+  final bool nativePlatformView;
 
   const SimpleVideo({
     super.key,
@@ -16,6 +20,7 @@ class SimpleVideo extends StatefulWidget {
     required this.controller,
     this.aspectRatio,
     this.filterQuality = FilterQuality.low,
+    this.nativePlatformView = true,
   });
 
   @override
@@ -76,6 +81,24 @@ class SimpleVideoState extends State<SimpleVideo> {
               children: [
                 if (!Platform.isMacOS)
                   Texture(textureId: id, filterQuality: widget.filterQuality),
+                if (widget.nativePlatformView &&
+                    !kIsWeb &&
+                    defaultTargetPlatform == TargetPlatform.iOS)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: UiKitView(
+                        key: ValueKey(widget.controller.player.handle),
+                        viewType:
+                            'com.alexmercerind/media_kit_video/native-video',
+                        hitTestBehavior:
+                            PlatformViewHitTestBehavior.transparent,
+                        creationParams: {
+                          'handle': widget.controller.player.handle,
+                        },
+                        creationParamsCodec: const StandardMessageCodec(),
+                      ),
+                    ),
+                  ),
                 if (rect.width <= 1.0 && rect.height <= 1.0)
                   Positioned.fill(child: ColoredBox(color: widget.fill)),
               ],

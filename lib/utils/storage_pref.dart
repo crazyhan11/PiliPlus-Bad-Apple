@@ -820,14 +820,24 @@ abstract final class Pref {
       _setting.get(SettingBoxKey.bufferSec, defaultValue: 16.0);
 
   static Map<String, String> initBuffer([double playbackSpeed = 1.0]) {
-    final bufSec = Pref.bufferSec * playbackSpeed;
-    final bufSiz = (Pref.bufferSize * 0x100000).toStringAsFixed(0);
+    final speed = playbackSpeed.clamp(1.0, 4.0);
+    final bufSec = Pref.bufferSec * speed;
+    final requestedForwardMB = Pref.bufferSize * speed;
+    final minimumForwardMB = Platform.isIOS ? 32.0 * speed : requestedForwardMB;
+    final forwardMB = requestedForwardMB > minimumForwardMB
+        ? requestedForwardMB
+        : minimumForwardMB;
+    final forwardBytes = (forwardMB * 0x100000).toStringAsFixed(0);
+    final backBytes = (Pref.bufferSize * 0x100000).toStringAsFixed(0);
+    final pauseWait = (1.5 * speed).clamp(1.0, 6.0);
     return {
       'cache': 'yes',
       'cache-secs': bufSec.toStringAsFixed(3),
       'demuxer-hysteresis-secs': (bufSec / 1.5).toStringAsFixed(3),
-      'demuxer-max-bytes': bufSiz,
-      'demuxer-max-back-bytes': bufSiz,
+      'demuxer-max-bytes': forwardBytes,
+      'demuxer-max-back-bytes': backBytes,
+      'cache-pause': 'yes',
+      'cache-pause-wait': pauseWait.toStringAsFixed(3),
     };
   }
 

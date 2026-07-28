@@ -799,6 +799,7 @@ class PlPlayerController with BlockConfigMixin {
   Map<String, String>? _buffer;
   Map<String, String> get buffer =>
       _buffer ??= Pref.initBuffer(_playbackSpeed.value);
+  bool _usesNetworkCache = false;
   Map<String, String>? _liveBuffer;
   Map<String, String> get liveBuffer => _liveBuffer ??= Pref.initLiveBuffer();
 
@@ -832,11 +833,14 @@ class PlPlayerController with BlockConfigMixin {
     final Map<String, String> extras = {};
 
     if (dataSource is FileSource) {
+      _usesNetworkCache = false;
       extras['cache'] = 'no';
     } else {
       if (isLive) {
+        _usesNetworkCache = false;
         extras.addAll(liveBuffer);
       } else {
+        _usesNetworkCache = true;
         extras.addAll(buffer);
       }
     }
@@ -855,14 +859,10 @@ class PlPlayerController with BlockConfigMixin {
           audioNormalization = _audioNormalizationParam.replaceFirstMapped(
             loudnormRegExp,
             (i) =>
-                'loudnorm=${volume.format(
-                  Map.fromEntries(
-                    i.group(1)!.split(':').map((item) {
-                      final parts = item.split('=');
-                      return MapEntry(parts[0].toLowerCase(), num.parse(parts[1]));
-                    }),
-                  ),
-                )}',
+                'loudnorm=${volume.format(Map.fromEntries(i.group(1)!.split(':').map((item) {
+                  final parts = item.split('=');
+                  return MapEntry(parts[0].toLowerCase(), num.parse(parts[1]));
+                })))}',
           );
         } else {
           audioNormalization = _audioNormalizationParam.replaceFirst(
@@ -877,11 +877,7 @@ class PlPlayerController with BlockConfigMixin {
     }
 
     await player.open(
-      Media(
-        video,
-        start: seekTo,
-        extras: extras.isEmpty ? null : extras,
-      ),
+      Media(video, start: seekTo, extras: extras.isEmpty ? null : extras),
       play: false,
     );
   }
@@ -1134,7 +1130,23 @@ class PlPlayerController with BlockConfigMixin {
       return;
     }
 
-    await _videoPlayerController?.setRate(speed);
+    final player = _videoPlayerController;
+    if (player != null) {
+      if (_usesNetworkCache) {
+        final updatedBuffer = Pref.initBuffer(speed);
+        _buffer = updatedBuffer;
+        for (final entry in updatedBuffer.entries) {
+          player.setProperty(entry.key, entry.value);
+        }
+      }
+      if (Platform.isIOS) {
+        final highSpeed = speed > 1.0;
+        player
+          ..setProperty('video-sync', highSpeed ? 'audio' : Pref.videoSync)
+          ..setProperty('framedrop', highSpeed ? 'vo' : 'no');
+      }
+      await player.setRate(speed);
+    }
     await _videoController?.setNativeVideoPlaybackRate(speed);
     _playbackSpeed.value = speed;
     if (danmakuController != null) {

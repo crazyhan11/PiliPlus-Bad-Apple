@@ -6,6 +6,7 @@ import 'package:PiliPlus/grpc/bilibili/community/service/dm/v1.pb.dart';
 import 'package:PiliPlus/pages/danmaku/controller.dart';
 import 'package:PiliPlus/pages/danmaku/danmaku_model.dart';
 import 'package:PiliPlus/pages/danmaku/macos_native_view.dart';
+import 'package:PiliPlus/pages/danmaku/apple_native_view.dart';
 import 'package:PiliPlus/plugin/pl_player/controller.dart';
 import 'package:PiliPlus/plugin/pl_player/models/play_status.dart';
 import 'package:PiliPlus/plugin/pl_player/utils/danmaku_options.dart';
@@ -193,6 +194,18 @@ class _PlDanmakuState extends State<PlDanmaku> {
       final handle = playerController.videoPlayerController?.handle;
       if (Platform.isMacOS && handle != null) {
         return MacOSNativeDanmaku<DanmakuExtra>(
+          handle: handle,
+          createdController: (e) {
+            playerController.danmakuController = _controller = e;
+            _syncControllerRunning();
+          },
+          option: option,
+          size: widget.size,
+          opacity: opacity,
+        );
+      }
+      if (Platform.isIOS && handle != null) {
+        return AppleNativeDanmaku<DanmakuExtra>(
           handle: handle,
           createdController: (e) {
             playerController.danmakuController = _controller = e;

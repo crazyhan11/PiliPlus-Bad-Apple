@@ -65,7 +65,13 @@ public class VideoOutputManager: NSObject {
     ) {
       videoOutputs[handle]?.attachNativePlatformView(view)
     }
+  #elseif canImport(Flutter) && !targetEnvironment(simulator)
+    public func setNativeSurface(handle: Int64, fit: String) {
+      videoOutputs[handle]?.setNativeSurface(fit: fit)
+    }
+  #endif
 
+  #if (canImport(Flutter) || canImport(FlutterMacOS)) && !targetEnvironment(simulator)
     public func setNativePlaybackRate(handle: Int64, rate: Double) {
       videoOutputs[handle]?.setNativePlaybackRate(rate)
     }

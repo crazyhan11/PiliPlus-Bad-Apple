@@ -6,21 +6,20 @@ APP_NAME="PiliPlus"
 BUNDLE_ID="com.example.piliplus"
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WORKSPACE_DIR="$(cd "$PROJECT_DIR/../.." && pwd)"
-TOOLCHAINS_DIR="/Users/han/Documents/Codex/toolchains"
-TOOLCHAIN_HOME="$TOOLCHAINS_DIR/home"
+FLUTTER_BIN="${FLUTTER_BIN:-$(command -v flutter || true)}"
+if [[ -z "$FLUTTER_BIN" ]]; then
+  echo "flutter was not found; set FLUTTER_BIN to the Flutter executable" >&2
+  exit 1
+fi
+FLUTTER_ROOT="$(cd "$(dirname "$FLUTTER_BIN")/.." && pwd)"
 BUILD_DIR="$PROJECT_DIR/build/macos-arm64"
 BUILT_APP="$BUILD_DIR/DerivedData/Build/Products/Release/$APP_NAME.app"
-APP_BUNDLE="$WORKSPACE_DIR/outputs/PiliPlus-Bad-Apple-macOS-arm64.app"
-CUSTOM_FLUTTER_FRAMEWORK="$TOOLCHAINS_DIR/flutter-3.44.6/engine/src/out/host_release_arm64/FlutterMacOS.framework"
+APP_BUNDLE="${PILIPLUS_MACOS_OUTPUT:-$PROJECT_DIR/outputs/PiliPlus-Bad-Apple-macOS-arm64.app}"
+CUSTOM_FLUTTER_FRAMEWORK="${PILIPLUS_FLUTTER_FRAMEWORK:-$FLUTTER_ROOT/engine/src/out/host_release_arm64/FlutterMacOS.framework}"
 APP_FLUTTER_FRAMEWORK="$APP_BUNDLE/Contents/Frameworks/FlutterMacOS.framework"
 
-export DEVELOPER_DIR="/Applications/Xcode-beta.app/Contents/Developer"
-export PUB_CACHE="$TOOLCHAIN_HOME/.pub-cache"
-export GEM_HOME="$TOOLCHAIN_HOME/.gem"
-export GEM_PATH="$TOOLCHAIN_HOME/.gem"
 export RUBYOPT="-rlogger"
-export PATH="$TOOLCHAINS_DIR/flutter-3.44.6/bin:$TOOLCHAIN_HOME/.gem/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export PATH="$(dirname "$FLUTTER_BIN"):$PATH"
 export FLUTTER_SUPPRESS_ANALYTICS=true
 export COCOAPODS_DISABLE_STATS=true
 
@@ -30,7 +29,7 @@ test -f "$CUSTOM_FLUTTER_FRAMEWORK/FlutterMacOS"
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
 cd "$PROJECT_DIR"
-flutter pub get --offline
+"$FLUTTER_BIN" pub get --offline
 (cd macos && pod install)
 xcodebuild \
   -workspace macos/Runner.xcworkspace \

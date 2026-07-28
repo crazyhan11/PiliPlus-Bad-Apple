@@ -14,6 +14,10 @@ public class MediaKitVideoPlugin: NSObject, FlutterPlugin {
       let binaryMessenger = registrar.messenger()
       let registry = registrar.textures()
       let utils: UtilsProtocol? = nil
+      registrar.register(
+        NativeVideoPlatformViewFactory(),
+        withId: "com.alexmercerind/media_kit_video/native-video"
+      )
     #elseif canImport(FlutterMacOS)
       let binaryMessenger = registrar.messenger
       let registry = registrar.textures
@@ -161,7 +165,7 @@ public class MediaKitVideoPlugin: NSObject, FlutterPlugin {
     _ arguments: Any?,
     _ result: FlutterResult
   ) {
-    #if canImport(FlutterMacOS)
+    #if (canImport(Flutter) || canImport(FlutterMacOS)) && !targetEnvironment(simulator)
       let args = arguments as? [String: Any]
       guard
         let handleStr = args?["handle"] as? String,
@@ -169,26 +173,33 @@ public class MediaKitVideoPlugin: NSObject, FlutterPlugin {
       else {
         return result(FlutterError(code: "invalid-arguments", message: nil, details: nil))
       }
-      let rect: CGRect?
-      if let value = args?["rect"] as? [String: Any],
-         let left = value["left"] as? NSNumber,
-         let top = value["top"] as? NSNumber,
-         let width = value["width"] as? NSNumber,
-         let height = value["height"] as? NSNumber {
-        rect = CGRect(
-          x: left.doubleValue,
-          y: top.doubleValue,
-          width: width.doubleValue,
-          height: height.doubleValue
+      #if canImport(FlutterMacOS)
+        let rect: CGRect?
+        if let value = args?["rect"] as? [String: Any],
+           let left = value["left"] as? NSNumber,
+           let top = value["top"] as? NSNumber,
+           let width = value["width"] as? NSNumber,
+           let height = value["height"] as? NSNumber {
+          rect = CGRect(
+            x: left.doubleValue,
+            y: top.doubleValue,
+            width: width.doubleValue,
+            height: height.doubleValue
+          )
+        } else {
+          rect = nil
+        }
+        videoOutputManager.setNativeSurface(
+          handle: handle,
+          rect: rect,
+          fit: args?["fit"] as? String ?? "contain"
         )
-      } else {
-        rect = nil
-      }
-      videoOutputManager.setNativeSurface(
-        handle: handle,
-        rect: rect,
-        fit: args?["fit"] as? String ?? "contain"
-      )
+      #else
+        videoOutputManager.setNativeSurface(
+          handle: handle,
+          fit: args?["fit"] as? String ?? "contain"
+        )
+      #endif
       result(nil)
     #else
       result(FlutterMethodNotImplemented)
@@ -199,7 +210,7 @@ public class MediaKitVideoPlugin: NSObject, FlutterPlugin {
     _ arguments: Any?,
     _ result: FlutterResult
   ) {
-    #if canImport(FlutterMacOS)
+    #if (canImport(Flutter) || canImport(FlutterMacOS)) && !targetEnvironment(simulator)
       let args = arguments as? [String: Any]
       guard
         let handleStr = args?["handle"] as? String,
@@ -220,7 +231,7 @@ public class MediaKitVideoPlugin: NSObject, FlutterPlugin {
     _ arguments: Any?,
     _ result: FlutterResult
   ) {
-    #if canImport(FlutterMacOS)
+    #if (canImport(Flutter) || canImport(FlutterMacOS)) && !targetEnvironment(simulator)
       guard
         let args = arguments as? [String: Any],
         let handleString = args["handle"] as? String,
