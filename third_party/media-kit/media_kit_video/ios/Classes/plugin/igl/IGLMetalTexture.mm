@@ -2,10 +2,12 @@
 
 #import <CoreVideo/CoreVideo.h>
 #import <Metal/Metal.h>
+#import <UIKit/UIKit.h>
 #import <simd/simd.h>
 
 #include <array>
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 
@@ -32,7 +34,72 @@ struct ColorParams {
   float2 cropOrigin;
   float2 cropSize;
   uint rotation;
+  uint hdrMode;
+  uint convertBT2020;
+  uint hdrOutput;
 };
+
+float3 pqToLinear(float3 value) {
+  const float m1 = 2610.0 / 16384.0;
+  const float m2 = 2523.0 / 32.0;
+  const float c1 = 3424.0 / 4096.0;
+  const float c2 = 2413.0 / 128.0;
+  const float c3 = 2392.0 / 128.0;
+  const float3 p = fast::powr(max(value, 0.0), float3(1.0 / m2));
+  return fast::powr(
+      max(p - c1, 0.0) / max(c2 - c3 * p, 1e-6), float3(1.0 / m1));
+}
+
+float3 hlgToLinear(float3 value) {
+  const float a = 0.17883277;
+  const float b = 0.28466892;
+  const float c = 0.55991073;
+  const float3 scene = select(
+      (value * value) / 3.0,
+      (fast::exp((value - c) / a) + b) / 12.0,
+      value > 0.5);
+  const float sceneLuma = max(dot(scene, float3(0.2627, 0.6780, 0.0593)), 1e-6);
+  return scene * fast::powr(sceneLuma, 0.2);
+}
+
+float toneMapChannel(float value) {
+  const float knee = 0.5;
+  if (value <= knee) {
+    return max(value, 0.0);
+  }
+  const float excess = value - knee;
+  return knee + (1.0 - knee) * excess / (excess + (1.0 - knee));
+}
+
+float3 toneMapHDR(float3 linear) {
+  linear = max(linear, 0.0);
+  const float peak = max(max(linear.r, linear.g), linear.b);
+  if (peak <= 1e-6) {
+    return 0.0;
+  }
+  return linear * (toneMapChannel(peak) / peak);
+}
+
+float3 bt2020ToExtendedSRGB(float3 value) {
+  const float3x3 conversion = float3x3(
+      float3(1.6605, -0.1246, -0.0182),
+      float3(-0.5876, 1.1329, -0.1006),
+      float3(-0.0728, -0.0083, 1.1187));
+  return max(conversion * value, 0.0);
+}
+
+float3 compressGamut(float3 value) {
+  const float peak = max(max(value.r, value.g), value.b);
+  return peak > 1.0 ? value / peak : value;
+}
+
+float3 linearToSRGB(float3 value) {
+  value = max(value, 0.0);
+  return select(
+      value * 12.92,
+      1.055 * fast::powr(value, float3(1.0 / 2.4)) - 0.055,
+      value > 0.0031308);
+}
 
 vertex VertexOut vertexMain(uint vertexID [[vertex_id]]) {
   const float2 positions[3] = {
@@ -62,7 +129,22 @@ fragment float4 fragmentMain(VertexOut in [[stage_in]],
   uv = params.cropOrigin + uv * params.cropSize;
   const float y = luma.sample(linearSampler, uv).r;
   const float2 cbcr = chroma.sample(linearSampler, uv).rg;
-  const float3 rgb = params.matrix * (float3(y, cbcr) + params.offset);
+  float3 rgb = params.matrix * (float3(y, cbcr) + params.offset);
+  if (params.hdrMode != 0) {
+    // PQ uses absolute luminance (1.0 = 10000 nits). HLG is evaluated for a
+    // nominal 1000-nit display. Normalize both around 203-nit HDR diffuse white.
+    rgb = params.hdrMode == 1
+        ? pqToLinear(rgb) * (10000.0 / 203.0)
+        : hlgToLinear(rgb) * (1000.0 / 203.0);
+    if (params.convertBT2020 != 0) {
+      rgb = bt2020ToExtendedSRGB(rgb);
+    }
+    if (params.hdrOutput != 0) {
+      return float4(linearToSRGB(rgb), 1.0);
+    }
+    rgb = compressGamut(toneMapHDR(rgb));
+    rgb = linearToSRGB(rgb);
+  }
   return float4(saturate(rgb), 1.0);
 }
 )";
@@ -73,6 +155,9 @@ struct ColorParams {
   simd_float2 cropOrigin;
   simd_float2 cropSize;
   uint32_t rotation;
+  uint32_t hdrMode;
+  uint32_t convertBT2020;
+  uint32_t hdrOutput;
 };
 
 static simd_float3x3 Matrix(float yScale, float rV, float gU, float gV, float bU) {
@@ -83,17 +168,28 @@ static simd_float3x3 Matrix(float yScale, float rV, float gU, float gV, float bU
 }
 
 static ColorParams GetColorParams(CVPixelBufferRef buffer,
-                                  const mpv_render_cvpixelbuffer_frame& frame) {
+                                  const mpv_render_cvpixelbuffer_frame& frame,
+                                  bool hdrOutput) {
   const OSType format = CVPixelBufferGetPixelFormatType(buffer);
+  const bool tenBit = format == kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange ||
+                      format == kCVPixelFormatType_420YpCbCr10BiPlanarFullRange;
   const bool fullRange = format == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange ||
                          format == kCVPixelFormatType_420YpCbCr10BiPlanarFullRange;
   CFTypeRef matrixAttachment = CVBufferGetAttachment(
       buffer, kCVImageBufferYCbCrMatrixKey, nullptr);
+  CFTypeRef transferAttachment = CVBufferGetAttachment(
+      buffer, kCVImageBufferTransferFunctionKey, nullptr);
+  CFTypeRef primariesAttachment = CVBufferGetAttachment(
+      buffer, kCVImageBufferColorPrimariesKey, nullptr);
 
   ColorParams result{};
-  const float yOffset = fullRange ? 0.0f : -(16.0f / 255.0f);
-  const float yScale = fullRange ? 1.0f : (255.0f / 219.0f);
-  result.offset = simd_make_float3(yOffset, -0.5f, -0.5f);
+  const float sampleMax = tenBit ? 1023.0f : 255.0f;
+  const float videoBlack = tenBit ? 64.0f : 16.0f;
+  const float videoRange = tenBit ? 876.0f : 219.0f;
+  const float chromaCenter = tenBit ? (512.0f / 1023.0f) : 0.5f;
+  const float yOffset = fullRange ? 0.0f : -(videoBlack / sampleMax);
+  const float yScale = fullRange ? 1.0f : (sampleMax / videoRange);
+  result.offset = simd_make_float3(yOffset, -chromaCenter, -chromaCenter);
 
   if (matrixAttachment && CFEqual(matrixAttachment, kCVImageBufferYCbCrMatrix_ITU_R_601_4)) {
     result.matrix = fullRange
@@ -121,6 +217,19 @@ static ColorParams GetColorParams(CVPixelBufferRef buffer,
                          (frame.crop_y1 - frame.crop_y0) / height)
       : simd_make_float2(1.0f, 1.0f);
   result.rotation = static_cast<uint32_t>((frame.rotate % 360 + 360) % 360);
+  if (transferAttachment &&
+      CFEqual(transferAttachment, kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ)) {
+    result.hdrMode = 1;
+  } else if (transferAttachment &&
+             CFEqual(transferAttachment, kCVImageBufferTransferFunction_ITU_R_2100_HLG)) {
+    result.hdrMode = 2;
+  }
+  result.convertBT2020 =
+      (primariesAttachment &&
+       CFEqual(primariesAttachment, kCVImageBufferColorPrimaries_ITU_R_2020)) ||
+      (matrixAttachment &&
+       CFEqual(matrixAttachment, kCVImageBufferYCbCrMatrix_ITU_R_2020));
+  result.hdrOutput = hdrOutput;
   return result;
 }
 
@@ -137,19 +246,30 @@ static NSString *ResultMessage(const igl::Result& result, NSString *operation) {
   mpv_render_context *_renderContext;
   IGLMetalTextureUpdateCallback _updateCallback;
   IGLMetalTextureFrameReadyCallback _frameReadyCallback;
+  IGLMetalTextureNativeFrameCallback _nativeFrameCallback;
+  IGLMetalTextureDynamicRangeCallback _dynamicRangeCallback;
   std::shared_ptr<igl::IDevice> _device;
   std::shared_ptr<igl::ICommandQueue> _queue;
-  std::shared_ptr<igl::IRenderPipelineState> _pipeline;
+  std::shared_ptr<igl::IRenderPipelineState> _sdrPipeline;
+  std::shared_ptr<igl::IRenderPipelineState> _hdrPipeline;
   std::shared_ptr<igl::ISamplerState> _sampler;
   std::array<CVPixelBufferRef, 3> _buffers;
   std::array<std::shared_ptr<igl::ITexture>, 3> _targetTextures;
   std::array<std::shared_ptr<igl::IFramebuffer>, 3> _framebuffers;
+  std::array<bool, 3> _inFlight;
   std::mutex _bufferMutex;
   std::atomic<int> _currentBuffer;
   std::atomic<int> _updateCount;
   std::atomic<int> _nativeFrameCount;
   int _writeBuffer;
   CVPixelBufferRef _renderTarget;
+  bool _renderSubmitted;
+  uint64_t _nextFrameSequence;
+  uint64_t _displayedFrameSequence;
+  NSInteger _bufferWidth;
+  NSInteger _bufferHeight;
+  bool _edrSupported;
+  bool _outputHDR;
   NSString *_lastError;
 }
 @end
@@ -159,6 +279,8 @@ static NSString *ResultMessage(const igl::Result& result, NSString *operation) {
 - (nullable instancetype)initWithHandle:(void *)handle
                          updateCallback:(IGLMetalTextureUpdateCallback)updateCallback
                       frameReadyCallback:(IGLMetalTextureFrameReadyCallback)frameReadyCallback
+                    nativeFrameCallback:(IGLMetalTextureNativeFrameCallback)nativeFrameCallback
+                    dynamicRangeCallback:(IGLMetalTextureDynamicRangeCallback)dynamicRangeCallback
                                    error:(NSString **)error {
   self = [super init];
   if (!self) {
@@ -168,42 +290,72 @@ static NSString *ResultMessage(const igl::Result& result, NSString *operation) {
   _renderContext = nullptr;
   _updateCallback = [updateCallback copy];
   _frameReadyCallback = [frameReadyCallback copy];
+  _nativeFrameCallback = [nativeFrameCallback copy];
+  _dynamicRangeCallback = [dynamicRangeCallback copy];
   _buffers.fill(nullptr);
+  _inFlight.fill(false);
   _currentBuffer.store(-1);
   _updateCount.store(0);
   _nativeFrameCount.store(0);
   _writeBuffer = -1;
   _renderTarget = nullptr;
+  _renderSubmitted = false;
+  _nextFrameSequence = 0;
+  _displayedFrameSequence = 0;
+  _bufferWidth = 0;
+  _bufferHeight = 0;
+  _edrSupported = UIScreen.mainScreen.potentialEDRHeadroom > 1.0;
+  _outputHDR = false;
 
   igl::Result result;
   igl::metal::HWDevice hardware;
   std::unique_ptr<igl::IDevice> device = hardware.createWithSystemDefaultDevice(&result);
-  if (!device || !result.isOk()) {
-    [self fail:ResultMessage(result, @"IGL Metal device") output:error];
-    return nil;
-  }
-  _device = std::shared_ptr<igl::IDevice>(std::move(device));
-  _queue = _device->createCommandQueue({}, &result);
-  if (!_queue || !result.isOk()) {
-    [self fail:ResultMessage(result, @"IGL command queue") output:error];
+    if (!device || !result.isOk()) {
+      [self fail:ResultMessage(result, @"IGL Metal device") output:error];
+      return nil;
+    }
+    _device = std::shared_ptr<igl::IDevice>(std::move(device));
+    _queue = _device->createCommandQueue({}, &result);
+    if (!_queue || !result.isOk()) {
+      [self fail:ResultMessage(result, @"IGL command queue") output:error];
+      return nil;
+    }
+
+    auto sdrStages = igl::ShaderStagesCreator::fromLibraryStringInput(
+        *_device, kShader, "vertexMain", "fragmentMain", "PiliPlusYUV", &result);
+  if (!sdrStages || !result.isOk()) {
+    [self fail:ResultMessage(result, @"IGL SDR Metal shader") output:error];
     return nil;
   }
 
-  auto stages = igl::ShaderStagesCreator::fromLibraryStringInput(
-      *_device, kShader, "vertexMain", "fragmentMain", "PiliPlusYUV", &result);
-  if (!stages || !result.isOk()) {
-    [self fail:ResultMessage(result, @"IGL Metal shader") output:error];
+  igl::RenderPipelineDesc sdrPipelineDesc;
+  sdrPipelineDesc.shaderStages = std::move(sdrStages);
+  sdrPipelineDesc.targetDesc.colorAttachments.resize(1);
+  sdrPipelineDesc.targetDesc.colorAttachments[0].textureFormat =
+      igl::TextureFormat::BGRA_UNorm8;
+  sdrPipelineDesc.cullMode = igl::CullMode::Disabled;
+  _sdrPipeline = _device->createRenderPipeline(sdrPipelineDesc, &result);
+  if (!_sdrPipeline || !result.isOk()) {
+    [self fail:ResultMessage(result, @"IGL SDR render pipeline") output:error];
     return nil;
   }
 
-  igl::RenderPipelineDesc pipelineDesc;
-  pipelineDesc.shaderStages = std::move(stages);
-  pipelineDesc.targetDesc.colorAttachments.resize(1);
-  pipelineDesc.targetDesc.colorAttachments[0].textureFormat = igl::TextureFormat::BGRA_UNorm8;
-  pipelineDesc.cullMode = igl::CullMode::Disabled;
-  _pipeline = _device->createRenderPipeline(pipelineDesc, &result);
-  if (!_pipeline || !result.isOk()) {
-    [self fail:ResultMessage(result, @"IGL render pipeline") output:error];
+  auto hdrStages = igl::ShaderStagesCreator::fromLibraryStringInput(
+      *_device, kShader, "vertexMain", "fragmentMain", "PiliPlusYUVHDR", &result);
+  if (!hdrStages || !result.isOk()) {
+    [self fail:ResultMessage(result, @"IGL HDR Metal shader") output:error];
+    return nil;
+  }
+
+  igl::RenderPipelineDesc hdrPipelineDesc;
+  hdrPipelineDesc.shaderStages = std::move(hdrStages);
+  hdrPipelineDesc.targetDesc.colorAttachments.resize(1);
+  hdrPipelineDesc.targetDesc.colorAttachments[0].textureFormat =
+      igl::TextureFormat::RGBA_F16;
+  hdrPipelineDesc.cullMode = igl::CullMode::Disabled;
+  _hdrPipeline = _device->createRenderPipeline(hdrPipelineDesc, &result);
+  if (!_hdrPipeline || !result.isOk()) {
+    [self fail:ResultMessage(result, @"IGL HDR render pipeline") output:error];
     return nil;
   }
 
@@ -237,10 +389,11 @@ static NSString *ResultMessage(const igl::Result& result, NSString *operation) {
         if (count <= 3) {
           NSLog(@"IGLMetalTexture: mpv update callback #%d", count);
         }
-        dispatch_async(dispatch_get_main_queue(), texture->_updateCallback);
+        texture->_updateCallback();
       },
       (__bridge void *)self);
-  NSLog(@"IGLMetalTexture: initialized renderer=igl-metal interop=cvmetaltexture");
+  NSLog(@"IGLMetalTexture: initialized renderer=%@",
+        _nativeFrameCallback ? @"apple-native-video-layer" : @"igl-metal interop=cvmetaltexture");
   return self;
 }
 
@@ -268,8 +421,15 @@ static NSString *ResultMessage(const igl::Result& result, NSString *operation) {
   return CVPixelBufferRetain(_buffers[index]);
 }
 
-- (BOOL)resizeWidth:(NSInteger)width height:(NSInteger)height error:(NSString **)error {
+- (BOOL)rebuildBuffersWidth:(NSInteger)width
+                     height:(NSInteger)height
+                        hdr:(BOOL)hdr
+                      error:(NSString **)error {
   if (width <= 0 || height <= 0) {
+    return YES;
+  }
+  if (_bufferWidth == width && _bufferHeight == height && _outputHDR == hdr &&
+      _buffers[0]) {
     return YES;
   }
 
@@ -280,12 +440,16 @@ static NSString *ResultMessage(const igl::Result& result, NSString *operation) {
     (NSString *)kCVPixelBufferIOSurfacePropertiesKey : @{},
     (NSString *)kCVPixelBufferMetalCompatibilityKey : @YES,
   };
+  const OSType pixelFormat =
+      hdr ? kCVPixelFormatType_64RGBAHalf : kCVPixelFormatType_32BGRA;
+  CGColorSpaceRef colorSpace = CGColorSpaceCreateWithName(
+      hdr ? kCGColorSpaceExtendedSRGB : kCGColorSpaceSRGB);
   for (CVPixelBufferRef& buffer : replacement) {
     const CVReturn result = CVPixelBufferCreate(
         kCFAllocatorDefault,
         width,
         height,
-        kCVPixelFormatType_32BGRA,
+        pixelFormat,
         (__bridge CFDictionaryRef)attributes,
         &buffer);
     if (result != kCVReturnSuccess) {
@@ -294,15 +458,23 @@ static NSString *ResultMessage(const igl::Result& result, NSString *operation) {
       }
       [self fail:[NSString stringWithFormat:@"CVPixelBufferCreate: %d", result]
             output:error];
+      if (colorSpace) CGColorSpaceRelease(colorSpace);
       return NO;
     }
+    if (colorSpace) {
+      CVBufferSetAttachment(
+          buffer, kCVImageBufferCGColorSpaceKey, colorSpace, kCVAttachmentMode_ShouldPropagate);
+    }
   }
+  if (colorSpace) CGColorSpaceRelease(colorSpace);
 
   auto *platform = _device->getPlatformDevice<igl::metal::PlatformDevice>();
+  const igl::TextureFormat textureFormat =
+      hdr ? igl::TextureFormat::RGBA_F16 : igl::TextureFormat::BGRA_UNorm8;
   for (size_t index = 0; index < replacement.size(); ++index) {
     igl::Result result;
     auto texture = platform->createTextureFromNativePixelBuffer(
-        replacement[index], igl::TextureFormat::BGRA_UNorm8, 0, &result);
+        replacement[index], textureFormat, 0, &result);
     if (!texture || !result.isOk()) {
       for (CVPixelBufferRef created : replacement) {
         if (created) CVPixelBufferRelease(created);
@@ -324,19 +496,48 @@ static NSString *ResultMessage(const igl::Result& result, NSString *operation) {
     }
   }
 
+  std::array<CVPixelBufferRef, 3> previousBuffers{};
+  std::array<std::shared_ptr<igl::ITexture>, 3> previousTextures{};
+  std::array<std::shared_ptr<igl::IFramebuffer>, 3> previousFramebuffers{};
+  const bool modeChanged = _outputHDR != hdr;
   {
     std::lock_guard<std::mutex> lock(_bufferMutex);
-    for (CVPixelBufferRef& buffer : _buffers) {
-      if (buffer) CVPixelBufferRelease(buffer);
-    }
+    previousBuffers = _buffers;
+    previousTextures = std::move(_targetTextures);
+    previousFramebuffers = std::move(_framebuffers);
     _buffers = replacement;
     _targetTextures = std::move(replacementTextures);
     _framebuffers = std::move(replacementFramebuffers);
+    _inFlight.fill(false);
     _currentBuffer.store(-1);
     _writeBuffer = -1;
+    _renderTarget = nullptr;
+    _renderSubmitted = false;
+    _bufferWidth = width;
+    _bufferHeight = height;
+    _outputHDR = hdr;
   }
-  NSLog(@"IGLMetalTexture: resize: %ldx%ld", (long)width, (long)height);
+  for (CVPixelBufferRef buffer : previousBuffers) {
+    if (buffer) CVPixelBufferRelease(buffer);
+  }
+  auto *completedPlatform =
+      _device->getPlatformDevice<igl::metal::PlatformDevice>();
+  completedPlatform->flushNativeTextureCache();
+  if (modeChanged) {
+    _dynamicRangeCallback(hdr, hdr ? (1000.0 / 203.0) : 1.0);
+  }
+  NSLog(@"IGLMetalTexture: output: %ldx%ld %@",
+        (long)width, (long)height, hdr ? @"RGBA16Float EDR" : @"BGRA8 SDR");
   return YES;
+}
+
+- (BOOL)resizeWidth:(NSInteger)width height:(NSInteger)height error:(NSString **)error {
+  if (_nativeFrameCallback) {
+    _bufferWidth = width;
+    _bufferHeight = height;
+    return YES;
+  }
+  return [self rebuildBuffersWidth:width height:height hdr:_outputHDR error:error];
 }
 
 - (BOOL)renderWidth:(NSInteger)width height:(NSInteger)height error:(NSString **)error {
@@ -346,8 +547,9 @@ static NSString *ResultMessage(const igl::Result& result, NSString *operation) {
 
   {
     std::lock_guard<std::mutex> lock(_bufferMutex);
-    _writeBuffer = (_writeBuffer + 1) % static_cast<int>(_buffers.size());
-    _renderTarget = _buffers[_writeBuffer];
+    _writeBuffer = -1;
+    _renderTarget = nullptr;
+    _renderSubmitted = false;
   }
 
   mpv_render_cvpixelbuffer_fn callback = [](void *context,
@@ -369,13 +571,16 @@ static NSString *ResultMessage(const igl::Result& result, NSString *operation) {
 
   {
     std::lock_guard<std::mutex> lock(_bufferMutex);
+    if (_writeBuffer >= 0 && !_renderSubmitted) {
+      _inFlight[_writeBuffer] = false;
+    }
     _renderTarget = nullptr;
   }
   return YES;
 }
 
 - (int)renderNativeFrame:(const mpv_render_cvpixelbuffer_frame&)frame {
-  if (!frame.pixel_buffer || !_renderTarget) {
+  if (!frame.pixel_buffer) {
     if (_nativeFrameCount.load() == 0) {
       NSLog(@"IGLMetalTexture: render callback without a native frame");
     }
@@ -386,8 +591,23 @@ static NSString *ResultMessage(const igl::Result& result, NSString *operation) {
   const OSType format = CVPixelBufferGetPixelFormatType(source);
   const int frameCount = _nativeFrameCount.fetch_add(1) + 1;
   if (frameCount == 1) {
+    CFTypeRef transfer = CVBufferGetAttachment(
+        source, kCVImageBufferTransferFunctionKey, nullptr);
+    CFTypeRef primaries = CVBufferGetAttachment(
+        source, kCVImageBufferColorPrimariesKey, nullptr);
+    CFTypeRef matrix = CVBufferGetAttachment(
+        source, kCVImageBufferYCbCrMatrixKey, nullptr);
     NSLog(@"IGLMetalTexture: first native frame format=%u size=%dx%d planes=%zu",
           format, frame.width, frame.height, CVPixelBufferGetPlaneCount(source));
+    NSLog(@"IGLMetalTexture: color transfer=%@ primaries=%@ matrix=%@",
+          (__bridge id)transfer ?: @"none",
+          (__bridge id)primaries ?: @"none",
+          (__bridge id)matrix ?: @"none");
+  }
+  if (_nativeFrameCallback &&
+      _nativeFrameCallback(source, frame.pts, frame.display_width,
+                           frame.display_height, frame.rotate)) {
+    return 0;
   }
   const bool tenBit = format == kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange ||
                       format == kCVPixelFormatType_420YpCbCr10BiPlanarFullRange;
@@ -396,7 +616,38 @@ static NSString *ResultMessage(const igl::Result& result, NSString *operation) {
       format == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange;
   if (!supported || CVPixelBufferGetPlaneCount(source) != 2) {
     _lastError = [NSString stringWithFormat:@"unsupported CVPixelBuffer: %u", format];
-    return MPV_ERROR_UNSUPPORTED;
+    NSLog(@"IGLMetalTexture: %@; preserving the last valid frame", _lastError);
+    return 0;
+  }
+
+  ColorParams color = GetColorParams(source, frame, false);
+  const bool hdrContent = color.hdrMode != 0;
+  const bool hdrOutput = hdrContent && _edrSupported;
+  if (![self rebuildBuffersWidth:_bufferWidth
+                          height:_bufferHeight
+                             hdr:hdrOutput
+                           error:nullptr]) {
+    return MPV_ERROR_GENERIC;
+  }
+  color.hdrOutput = hdrOutput;
+
+  {
+    std::lock_guard<std::mutex> lock(_bufferMutex);
+    const int current = _currentBuffer.load();
+    const int start = (_writeBuffer + 1) % static_cast<int>(_buffers.size());
+    _writeBuffer = -1;
+    for (int offset = 0; offset < static_cast<int>(_buffers.size()); ++offset) {
+      const int candidate = (start + offset) % static_cast<int>(_buffers.size());
+      if (!_inFlight[candidate] && candidate != current) {
+        _writeBuffer = candidate;
+        break;
+      }
+    }
+    if (_writeBuffer < 0) {
+      return 0;
+    }
+    _inFlight[_writeBuffer] = true;
+    _renderTarget = _buffers[_writeBuffer];
   }
 
   igl::Result result;
@@ -438,40 +689,41 @@ static NSString *ResultMessage(const igl::Result& result, NSString *operation) {
     [self fail:ResultMessage(result, @"IGL render encoder") output:nullptr];
     return MPV_ERROR_GENERIC;
   }
-  encoder->bindRenderPipelineState(_pipeline);
+  encoder->bindRenderPipelineState(hdrOutput ? _hdrPipeline : _sdrPipeline);
   encoder->bindTexture(0, igl::BindTarget::kFragment, yTexture.get());
   encoder->bindTexture(1, igl::BindTarget::kFragment, uvTexture.get());
   encoder->bindSamplerState(0, igl::BindTarget::kFragment, _sampler.get());
-  const ColorParams color = GetColorParams(source, frame);
   encoder->bindBytes(0, igl::BindTarget::kFragment, &color, sizeof(color));
   encoder->draw(3);
   encoder->endEncoding();
 
   const int completedIndex = _writeBuffer;
+  const uint64_t completedSequence = ++_nextFrameSequence;
   CVPixelBufferRef completedTarget = CVPixelBufferRetain(_renderTarget);
+  _renderSubmitted = true;
   id<MTLCommandBuffer> metalCommandBuffer =
       static_cast<igl::metal::CommandBuffer&>(*commandBuffer).get();
   [metalCommandBuffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
-    if (completed.status == MTLCommandBufferStatusError) {
-      [self fail:[NSString stringWithFormat:@"Metal command buffer: %@",
-                                             completed.error.localizedDescription ?: @"unknown"]
-            output:nullptr];
-    } else {
-      bool frameAccepted = false;
-      {
-        std::lock_guard<std::mutex> lock(self->_bufferMutex);
-        if (self->_buffers[completedIndex] == completedTarget) {
+    bool frameAccepted = false;
+    {
+      std::lock_guard<std::mutex> lock(self->_bufferMutex);
+      if (self->_buffers[completedIndex] == completedTarget) {
+        self->_inFlight[completedIndex] = false;
+        if (completed.status != MTLCommandBufferStatusError &&
+            completedSequence > self->_displayedFrameSequence) {
+          self->_displayedFrameSequence = completedSequence;
           self->_currentBuffer.store(completedIndex);
           frameAccepted = true;
         }
       }
-      if (frameAccepted) {
-        dispatch_async(dispatch_get_main_queue(), self->_frameReadyCallback);
-      }
     }
-    auto *completedPlatform =
-        self->_device->getPlatformDevice<igl::metal::PlatformDevice>();
-    completedPlatform->flushNativeTextureCache();
+    if (completed.status == MTLCommandBufferStatusError) {
+      [self fail:[NSString stringWithFormat:@"Metal command buffer: %@",
+                                             completed.error.localizedDescription ?: @"unknown"]
+            output:nullptr];
+    } else if (frameAccepted) {
+      dispatch_async(dispatch_get_main_queue(), self->_frameReadyCallback);
+    }
     CVPixelBufferRelease(completedTarget);
   }];
   _queue->submit(*commandBuffer, true);
@@ -479,7 +731,9 @@ static NSString *ResultMessage(const igl::Result& result, NSString *operation) {
 }
 
 - (NSString *)rendererDescription {
-  return @"igl-metal / cvmetaltexture / flutter-cvpixelbuffer";
+  return _nativeFrameCallback
+      ? @"apple-native-video-layer / videotoolbox-cvpixelbuffer"
+      : @"igl-metal / cvmetaltexture / flutter-cvpixelbuffer";
 }
 
 - (NSString *)lastError {

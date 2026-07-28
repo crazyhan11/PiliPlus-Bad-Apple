@@ -75,6 +75,10 @@ class PlPlayerController with BlockConfigMixin {
   static PlPlayerController? _instance;
 
   final playerStatus = PlPlayerStatus(.playing);
+  bool _playbackRequested = true;
+
+  bool get shouldRunDanmaku =>
+      _playbackRequested && playerStatus.isPlaying && !isBuffering.value;
 
   final Rx<DataStatus> dataStatus = Rx(.none);
 
@@ -795,6 +799,7 @@ class PlPlayerController with BlockConfigMixin {
   Map<String, String>? _buffer;
   Map<String, String> get buffer =>
       _buffer ??= Pref.initBuffer(_playbackSpeed.value);
+  bool _usesNetworkCache = false;
   Map<String, String>? _liveBuffer;
   Map<String, String> get liveBuffer => _liveBuffer ??= Pref.initLiveBuffer();
 
@@ -828,11 +833,14 @@ class PlPlayerController with BlockConfigMixin {
     final Map<String, String> extras = {};
 
     if (dataSource is FileSource) {
+      _usesNetworkCache = false;
       extras['cache'] = 'no';
     } else {
       if (isLive) {
+        _usesNetworkCache = false;
         extras.addAll(liveBuffer);
       } else {
+        _usesNetworkCache = true;
         extras.addAll(buffer);
       }
     }
@@ -887,6 +895,7 @@ class PlPlayerController with BlockConfigMixin {
       return null;
     }
     if (_videoPlayerController case final ctr? when (ctr.current.isNotEmpty)) {
+      _playbackRequested = true;
       return ctr.open(
         ctr.current.last.copyWith(start: ctr.state.position),
         play: true,
@@ -1125,10 +1134,28 @@ class PlPlayerController with BlockConfigMixin {
     lastPlaybackSpeed = playbackSpeed;
 
     if (speed == _videoPlayerController?.state.rate) {
+      await _videoController?.setNativeVideoPlaybackRate(speed);
       return;
     }
 
-    await _videoPlayerController?.setRate(speed);
+    final player = _videoPlayerController;
+    if (player != null) {
+      if (_usesNetworkCache) {
+        final updatedBuffer = Pref.initBuffer(speed);
+        _buffer = updatedBuffer;
+        for (final entry in updatedBuffer.entries) {
+          player.setProperty(entry.key, entry.value);
+        }
+      }
+      if (Platform.isIOS) {
+        final highSpeed = speed > 1.0;
+        player
+          ..setProperty('video-sync', highSpeed ? 'audio' : Pref.videoSync)
+          ..setProperty('framedrop', highSpeed ? 'vo' : 'no');
+      }
+      await player.setRate(speed);
+    }
+    await _videoController?.setNativeVideoPlaybackRate(speed);
     _playbackSpeed.value = speed;
     if (danmakuController != null) {
       try {
@@ -1149,12 +1176,14 @@ class PlPlayerController with BlockConfigMixin {
   double playSpeedDefault = Pref.playSpeedDefault;
   Future<void> setDefaultSpeed() async {
     await _videoPlayerController?.setRate(playSpeedDefault);
+    await _videoController?.setNativeVideoPlaybackRate(playSpeedDefault);
     _playbackSpeed.value = playSpeedDefault;
   }
 
   /// 播放视频
   Future<void> play({bool repeat = false, bool hideControls = true}) async {
     if (_playerCount == 0) return;
+    _playbackRequested = true;
     // 播放时自动隐藏控制条
     controls = !hideControls;
     // repeat为true，将从头播放
@@ -1173,6 +1202,10 @@ class PlPlayerController with BlockConfigMixin {
 
   /// 暂停播放
   Future<void> pause({bool notify = true, bool isInterrupt = false}) async {
+    // Latch the user's intent before mpv acknowledges the pause. A delayed
+    // playing=true event must not resume native danmaku in this interval.
+    _playbackRequested = false;
+    danmakuController?.pause();
     await _videoPlayerController?.pause();
     playerStatus.value = PlayerStatus.paused;
 
@@ -1312,9 +1345,11 @@ class PlPlayerController with BlockConfigMixin {
   Future<void> onDoubleTapCenter() async {
     if (!isLive && isCompleted) {
       await videoPlayerController!.seek(Duration.zero);
-      videoPlayerController!.play();
+      await play();
+    } else if (_playbackRequested) {
+      await pause();
     } else {
-      videoPlayerController!.playOrPause();
+      await play();
     }
   }
 

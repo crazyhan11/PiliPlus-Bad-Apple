@@ -6,12 +6,20 @@ NS_ASSUME_NONNULL_BEGIN
 
 typedef void (^IGLMetalTextureUpdateCallback)(void);
 typedef void (^IGLMetalTextureFrameReadyCallback)(void);
+typedef BOOL (^IGLMetalTextureNativeFrameCallback)(CVPixelBufferRef pixelBuffer,
+                                                    double presentationTime,
+                                                    int displayWidth,
+                                                    int displayHeight,
+                                                    int rotate);
+typedef void (^IGLMetalTextureDynamicRangeCallback)(BOOL hdr, CGFloat headroom);
 
 @interface IGLMetalTexture : NSObject <FlutterTexture>
 
 - (nullable instancetype)initWithHandle:(void *)handle
                          updateCallback:(IGLMetalTextureUpdateCallback)updateCallback
                       frameReadyCallback:(IGLMetalTextureFrameReadyCallback)frameReadyCallback
+                    nativeFrameCallback:(IGLMetalTextureNativeFrameCallback _Nullable)nativeFrameCallback
+                    dynamicRangeCallback:(IGLMetalTextureDynamicRangeCallback)dynamicRangeCallback
                                    error:(NSString *_Nullable *_Nullable)error;
 
 - (BOOL)resizeWidth:(NSInteger)width

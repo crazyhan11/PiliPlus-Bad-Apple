@@ -72,7 +72,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart'
-    show RenderProxyBox, SemanticsConfiguration;
+    show PlatformViewHitTestBehavior, RenderProxyBox, SemanticsConfiguration;
 import 'package:flutter/services.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:flutter_volume_controller/flutter_volume_controller.dart';
@@ -137,6 +137,8 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
 
   final _playerKey = GlobalKey();
   final _videoKey = GlobalKey();
+  bool _nativeSurfaceUpdateScheduled = false;
+  String? _lastNativeSurfaceFit;
 
   final RxDouble _brightnessValue = 0.0.obs;
   final RxBool _brightnessIndicator = false.obs;
@@ -1358,6 +1360,24 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
       children: <Widget>[
         _videoWidget,
 
+        if (Platform.isIOS &&
+            plPlayerController.videoPlayerController?.handle != null)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: UiKitView(
+                key: ValueKey(
+                  plPlayerController.videoPlayerController!.handle,
+                ),
+                viewType: 'com.alexmercerind/media_kit_video/native-video',
+                hitTestBehavior: PlatformViewHitTestBehavior.transparent,
+                creationParams: {
+                  'handle': plPlayerController.videoPlayerController!.handle,
+                },
+                creationParamsCodec: const StandardMessageCodec(),
+              ),
+            ),
+          ),
+
         if (widget.danmuWidget case final danmaku?)
           Positioned.fill(top: 4, child: danmaku),
 
@@ -2037,6 +2057,7 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
             child: Obx(
               () {
                 final videoFit = plPlayerController.videoFit.value;
+                _scheduleNativeVideoSurface(videoFit.boxFit);
                 return Transform.flip(
                   flipX: plPlayerController.flipX.value,
                   flipY: plPlayerController.flipY.value,
@@ -2047,6 +2068,7 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
                       controller: plPlayerController.videoController!,
                       fill: widget.fill,
                       aspectRatio: videoFit.aspectRatio,
+                      nativePlatformView: !Platform.isIOS,
                     ),
                   ),
                 );
@@ -2056,6 +2078,23 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
         ),
       ),
     );
+  }
+
+  void _scheduleNativeVideoSurface(BoxFit fit) {
+    if (!Platform.isIOS || _nativeSurfaceUpdateScheduled) return;
+    _nativeSurfaceUpdateScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _nativeSurfaceUpdateScheduled = false;
+      if (!mounted) return;
+      final fitName = switch (fit) {
+        BoxFit.cover => 'cover',
+        BoxFit.fill => 'fill',
+        _ => 'contain',
+      };
+      if (_lastNativeSurfaceFit == fitName) return;
+      _lastNativeSurfaceFit = fitName;
+      plPlayerController.videoController?.setNativeVideoSurface(fit: fitName);
+    });
   }
 
   Future<void> screenshotWebp() async {

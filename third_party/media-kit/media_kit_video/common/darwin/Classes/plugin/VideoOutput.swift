@@ -13,6 +13,9 @@
 public class VideoOutput: NSObject {
   // Will be called on the main thread
   public typealias TextureUpdateCallback = (Int64, CGSize) -> Void
+  private static let dynamicRangeNotification = Notification.Name(
+    "PiliPlusVideoDynamicRangeDidChange"
+  )
 
   private static let isSimulator: Bool = {
     let isSim: Bool
@@ -34,9 +37,16 @@ public class VideoOutput: NSObject {
   private var texture: ResizableTextureProtocol!
   private var textureId: Int64 = -1
   private var currentSize: CGSize = CGSize.zero
+  private var nativeFrameSize: CGSize = CGSize.zero
   private var zeroSizeUpdateCount: Int = 0
   private var asynchronousFrameDelivery: Bool = false
+  private let updateStateLock = NSLock()
+  private var updateScheduled: Bool = false
+  private var updateRequested: Bool = false
   private var disposed: Bool = false
+  #if canImport(Flutter) && !targetEnvironment(simulator)
+    private var nativePresenter: NativeVideoPresenter?
+  #endif
 
   init(
     handle: Int64,
@@ -56,15 +66,27 @@ public class VideoOutput: NSObject {
 
     super.init()
 
+    #if canImport(Flutter) && !targetEnvironment(simulator)
+      nativePresenter = NativeVideoPresenter(
+        handle: Int64(Int(bitPattern: self.handle))
+      )
+    #endif
+
     worker.enqueue {
       self._init()
     }
   }
 
   deinit {
-    worker.cancel()
-
+    updateStateLock.lock()
     disposed = true
+    updateRequested = false
+    updateStateLock.unlock()
+    worker.cancel()
+    #if canImport(Flutter) && !targetEnvironment(simulator)
+      nativePresenter?.dispose()
+    #endif
+    publishDynamicRange(hdr: false, headroom: 1.0)
     disposeTextureId()
   }
 
@@ -74,6 +96,40 @@ public class VideoOutput: NSObject {
       self.height = height
     }
   }
+
+  #if canImport(Flutter) && !targetEnvironment(simulator)
+    public func setNativeSurface(fit: String) {
+      nativePresenter?.setFit(fit)
+    }
+
+    public func setNativePlaybackRate(_ rate: Double) {
+      nativePresenter?.setPlaybackRate(rate)
+    }
+
+    public func configureDanmaku(_ values: [String: Any]) {
+      nativePresenter?.configureDanmaku(values)
+    }
+
+    public func addDanmaku(_ values: [[String: Any]], epoch: Int64) {
+      nativePresenter?.addDanmaku(values, epoch: epoch)
+    }
+
+    public func pauseDanmaku(epoch: Int64) {
+      nativePresenter?.pauseDanmaku(epoch: epoch)
+    }
+
+    public func resumeDanmaku(epoch: Int64) {
+      nativePresenter?.resumeDanmaku(epoch: epoch)
+    }
+
+    public func clearDanmaku(epoch: Int64) {
+      nativePresenter?.clearDanmaku(epoch: epoch)
+    }
+
+    public func setDanmakuOpacity(_ opacity: Float) {
+      nativePresenter?.setDanmakuOpacity(opacity)
+    }
+  #endif
 
   private func _init() {
     let enableHardwareAcceleration =
@@ -101,6 +157,27 @@ public class VideoOutput: NSObject {
           frameReadyCallback: { [weak self]() in
             guard let that = self else { return }
             that.notifyTextureFrameAvailable()
+          },
+          nativeFrameCallback: { [weak self] pixelBuffer, presentationTime,
+            displayWidth, displayHeight, rotate in
+            guard let self else { return false }
+            let normalizedRotation = (rotate % 360 + 360) % 360
+            let swapsDimensions = normalizedRotation == 90 || normalizedRotation == 270
+            let frameWidth = swapsDimensions ? displayHeight : displayWidth
+            let frameHeight = swapsDimensions ? displayWidth : displayHeight
+            if frameWidth > 0 && frameHeight > 0 {
+              self.nativeFrameSize = CGSize(
+                width: Double(frameWidth),
+                height: Double(frameHeight)
+              )
+            }
+            return self.nativePresenter?.enqueue(
+              pixelBuffer,
+              presentationTime: presentationTime
+            ) ?? false
+          },
+          dynamicRangeCallback: { [weak self] hdr, headroom in
+            self?.publishDynamicRange(hdr: hdr, headroom: headroom)
           },
           error: &iglError
         ) {
@@ -176,8 +253,48 @@ public class VideoOutput: NSObject {
   }
 
   public func updateCallback() {
+    updateStateLock.lock()
+    guard !disposed else {
+      updateStateLock.unlock()
+      return
+    }
+    if updateScheduled {
+      updateRequested = true
+      updateStateLock.unlock()
+      return
+    }
+    updateScheduled = true
+    updateStateLock.unlock()
+
     worker.enqueue {
-      self._updateCallback()
+      [weak self] in
+      self?.processUpdateCallback()
+    }
+  }
+
+  private func processUpdateCallback() {
+    updateStateLock.lock()
+    if disposed {
+      updateScheduled = false
+      updateStateLock.unlock()
+      return
+    }
+    updateRequested = false
+    updateStateLock.unlock()
+
+    _updateCallback()
+
+    updateStateLock.lock()
+    let shouldScheduleNext = updateRequested && !disposed
+    if !shouldScheduleNext {
+      updateScheduled = false
+    }
+    updateStateLock.unlock()
+
+    if shouldScheduleNext {
+      worker.enqueue { [weak self] in
+        self?.processUpdateCallback()
+      }
     }
   }
 
@@ -225,7 +342,22 @@ public class VideoOutput: NSObject {
     }
   }
 
-    private var videoSize: CGSize {
+  private func publishDynamicRange(hdr: Bool, headroom: CGFloat) {
+    let handleValue = Int64(Int(bitPattern: handle))
+    DispatchQueue.main.async {
+      NotificationCenter.default.post(
+        name: VideoOutput.dynamicRangeNotification,
+        object: nil,
+        userInfo: [
+          "handle": handleValue,
+          "hdr": hdr,
+          "headroom": headroom,
+        ]
+      )
+    }
+  }
+
+  private var videoSize: CGSize {
         // fixed size
         if width != nil && height != nil {
             return CGSize(
@@ -234,6 +366,13 @@ public class VideoOutput: NSObject {
             )
         }
         
+        if nativeFrameSize.width > 0 && nativeFrameSize.height > 0 {
+            return CGSize(
+                width: Double(width ?? Int64(nativeFrameSize.width)),
+                height: Double(height ?? Int64(nativeFrameSize.height))
+            )
+        }
+
         let params = MPVHelpers.getVideoOutParams(handle)
         return CGSize(
             width: Double(width ?? (params.rotate == 0 || params.rotate == 180

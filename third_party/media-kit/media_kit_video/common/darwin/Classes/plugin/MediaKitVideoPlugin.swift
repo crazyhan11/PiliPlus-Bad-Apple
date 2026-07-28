@@ -12,6 +12,10 @@ public class MediaKitVideoPlugin: NSObject, FlutterPlugin {
       let binaryMessenger = registrar.messenger()
       let registry = registrar.textures()
       let utils: UtilsProtocol? = nil
+      registrar.register(
+        NativeVideoPlatformViewFactory(),
+        withId: "com.alexmercerind/media_kit_video/native-video"
+      )
     #elseif canImport(FlutterMacOS)
       let binaryMessenger = registrar.messenger
       let registry = registrar.textures
@@ -55,6 +59,12 @@ public class MediaKitVideoPlugin: NSObject, FlutterPlugin {
       handleCreateMethodCall(call.arguments, result)
     case "VideoOutputManager.SetSize":
       handleSetSizeMethodCall(call.arguments, result)
+    case "VideoOutputManager.SetNativeSurface":
+      handleSetNativeSurfaceMethodCall(call.arguments, result)
+    case "VideoOutputManager.SetNativePlaybackRate":
+      handleSetNativePlaybackRateMethodCall(call.arguments, result)
+    case "Danmaku.Configure", "Danmaku.Add", "Danmaku.AddBatch", "Danmaku.Pause", "Danmaku.Resume", "Danmaku.Clear", "Danmaku.SetOpacity":
+      handleDanmakuMethodCall(call.method, call.arguments, result)
     case "VideoOutputManager.Dispose":
       handleDisposeMethodCall(call.arguments, result)
     case "Utils.EnterNativeFullscreen":
@@ -140,6 +150,95 @@ public class MediaKitVideoPlugin: NSObject, FlutterPlugin {
     )
 
     result(nil)
+  }
+
+  private func handleSetNativeSurfaceMethodCall(
+    _ arguments: Any?,
+    _ result: FlutterResult
+  ) {
+    #if canImport(Flutter) && !targetEnvironment(simulator)
+      let args = arguments as? [String: Any]
+      guard
+        let handleString = args?["handle"] as? String,
+        let handle = Int64(handleString)
+      else {
+        return result(FlutterError(code: "invalid-arguments", message: nil, details: nil))
+      }
+      videoOutputManager.setNativeSurface(
+        handle: handle,
+        fit: args?["fit"] as? String ?? "contain"
+      )
+      result(nil)
+    #else
+      result(FlutterMethodNotImplemented)
+    #endif
+  }
+
+  private func handleDanmakuMethodCall(
+    _ method: String,
+    _ arguments: Any?,
+    _ result: FlutterResult
+  ) {
+    #if canImport(Flutter) && !targetEnvironment(simulator)
+      guard
+        let args = arguments as? [String: Any],
+        let handleString = args["handle"] as? String,
+        let handle = Int64(handleString)
+      else {
+        return result(FlutterError(code: "invalid-arguments", message: nil, details: nil))
+      }
+      switch method {
+      case "Danmaku.Configure":
+        videoOutputManager.configureDanmaku(handle: handle, values: args)
+      case "Danmaku.Add":
+        videoOutputManager.addDanmaku(handle: handle, values: args, epoch: 0)
+      case "Danmaku.AddBatch":
+        let epoch = (args["epoch"] as? NSNumber)?.int64Value ?? 0
+        let items = args["items"] as? [[String: Any]] ?? []
+        videoOutputManager.addDanmaku(
+          handle: handle,
+          values: items,
+          epoch: epoch
+        )
+      case "Danmaku.Pause":
+        let epoch = (args["epoch"] as? NSNumber)?.int64Value ?? 0
+        videoOutputManager.pauseDanmaku(handle: handle, epoch: epoch)
+      case "Danmaku.Resume":
+        let epoch = (args["epoch"] as? NSNumber)?.int64Value ?? 0
+        videoOutputManager.resumeDanmaku(handle: handle, epoch: epoch)
+      case "Danmaku.Clear":
+        let epoch = (args["epoch"] as? NSNumber)?.int64Value ?? 0
+        videoOutputManager.clearDanmaku(handle: handle, epoch: epoch)
+      case "Danmaku.SetOpacity":
+        let opacity = (args["opacity"] as? NSNumber)?.floatValue ?? 1
+        videoOutputManager.setDanmakuOpacity(handle: handle, opacity: opacity)
+      default:
+        break
+      }
+      result(nil)
+    #else
+      result(FlutterMethodNotImplemented)
+    #endif
+  }
+
+  private func handleSetNativePlaybackRateMethodCall(
+    _ arguments: Any?,
+    _ result: FlutterResult
+  ) {
+    #if canImport(Flutter) && !targetEnvironment(simulator)
+      let args = arguments as? [String: Any]
+      guard
+        let handleString = args?["handle"] as? String,
+        let handle = Int64(handleString),
+        let rate = (args?["rate"] as? NSNumber)?.doubleValue
+      else {
+        return result(FlutterError(code: "invalid-arguments", message: nil, details: nil))
+      }
+      videoOutputManager.setNativePlaybackRate(handle: handle, rate: rate)
+      result(nil)
+    #else
+      result(FlutterMethodNotImplemented)
+    #endif
   }
 
   private func handleEnterNativeFullscreenMethodCall(

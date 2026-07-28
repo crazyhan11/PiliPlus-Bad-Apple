@@ -139,6 +139,36 @@ class NativeVideoController extends PlatformVideoController {
     });
   }
 
+  @override
+  Future<void>? setNativeVideoSurface({Rect? rect, String fit = 'contain'}) {
+    if (!Platform.isIOS) {
+      return null;
+    }
+    return _channel.invokeMethod('VideoOutputManager.SetNativeSurface', {
+      'handle': player.handle.toString(),
+      'rect': rect == null
+          ? null
+          : {
+              'left': rect.left,
+              'top': rect.top,
+              'width': rect.width,
+              'height': rect.height,
+            },
+      'fit': fit,
+    });
+  }
+
+  @override
+  Future<void>? setNativeVideoPlaybackRate(double rate) {
+    if (!Platform.isIOS) {
+      return null;
+    }
+    return _channel.invokeMethod('VideoOutputManager.SetNativePlaybackRate', {
+      'handle': player.handle.toString(),
+      'rate': rate,
+    });
+  }
+
   /// Disposes the instance. Releases allocated resources back to the system.
   Future<void> _dispose() {
     final handle = player.handle;
