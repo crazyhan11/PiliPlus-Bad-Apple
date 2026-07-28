@@ -86,9 +86,10 @@ class LoginAccount extends Account {
   }
 
   @override
-  Future<void> onChange() {
+  Future<void> onChange() async {
     assert(!_hasDelete);
-    return _box.put(_midStr, this);
+    await _box.put(_midStr, this);
+    await _box.flush();
   }
 
   @override

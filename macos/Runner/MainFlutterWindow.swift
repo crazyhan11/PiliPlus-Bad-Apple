@@ -9,11 +9,17 @@ class MainFlutterWindow: NSWindow {
     self.contentViewController = flutterViewController
     self.setFrame(self.frame, display: true)
 
-    // 背景别用默认黑色
-    self.isOpaque = false
-    self.backgroundColor = .clear
+    // Keep a system material base beneath Flutter's Apple glass layout.
+    self.isOpaque = true
+    self.backgroundColor = .windowBackgroundColor
 
     RegisterGeneratedPlugins(registry: flutterViewController)
+    flutterViewController.engine
+      .registrar(forPlugin: "MacOSGlassSurface")
+      .register(
+        MacOSGlassSurfaceFactory(),
+        withId: "com.piliplus.badapple/ios-glass-surface"
+      )
 
     // 监听首帧渲染完成再显示窗口
     NotificationCenter.default.addObserver(

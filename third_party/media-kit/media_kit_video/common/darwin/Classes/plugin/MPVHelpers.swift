@@ -27,4 +27,15 @@ public enum MPVHelpers {
 
     return MPVVideoOutParams.fromMPVNodeList(map)
   }
+
+  public static func getDoubleProperty(
+    _ handle: OpaquePointer,
+    name: String
+  ) -> Double? {
+    var value = 0.0
+    let status = name.withCString {
+      mpv_get_property(handle, $0, MPV_FORMAT_DOUBLE, &value)
+    }
+    return status >= 0 && value.isFinite ? value : nil
+  }
 }

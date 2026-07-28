@@ -53,4 +53,49 @@ public class VideoOutputManager: NSObject {
 
     self.videoOutputs[handle] = nil
   }
+
+  #if canImport(FlutterMacOS)
+    public func setNativeSurface(handle: Int64, rect: CGRect?, fit: String) {
+      videoOutputs[handle]?.setNativeSurface(rect: rect, fit: fit)
+    }
+
+    func attachNativePlatformView(
+      handle: Int64,
+      view: NativeVideoPlatformView
+    ) {
+      videoOutputs[handle]?.attachNativePlatformView(view)
+    }
+
+    public func setNativePlaybackRate(handle: Int64, rate: Double) {
+      videoOutputs[handle]?.setNativePlaybackRate(rate)
+    }
+
+    public func configureDanmaku(handle: Int64, values: [String: Any]) {
+      videoOutputs[handle]?.configureDanmaku(values)
+    }
+
+    public func addDanmaku(handle: Int64, values: [String: Any], epoch: Int64) {
+      videoOutputs[handle]?.addDanmaku([values], epoch: epoch)
+    }
+
+    public func addDanmaku(handle: Int64, values: [[String: Any]], epoch: Int64) {
+      videoOutputs[handle]?.addDanmaku(values, epoch: epoch)
+    }
+
+    public func pauseDanmaku(handle: Int64, epoch: Int64) {
+      videoOutputs[handle]?.pauseDanmaku(epoch: epoch)
+    }
+
+    public func resumeDanmaku(handle: Int64, epoch: Int64) {
+      videoOutputs[handle]?.resumeDanmaku(epoch: epoch)
+    }
+
+    public func clearDanmaku(handle: Int64, epoch: Int64) {
+      videoOutputs[handle]?.clearDanmaku(epoch: epoch)
+    }
+
+    public func setDanmakuOpacity(handle: Int64, opacity: Float) {
+      videoOutputs[handle]?.setDanmakuOpacity(opacity)
+    }
+  #endif
 }

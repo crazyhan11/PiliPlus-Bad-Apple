@@ -84,6 +84,9 @@ class MineController extends CommonDataController<FavFolderData, FavFolderData>
       userInfo.value = userInfoCache;
       queryData();
       queryUserInfo();
+    } else if (Accounts.main.isLogin) {
+      queryData();
+      queryUserInfo();
     }
   }
 

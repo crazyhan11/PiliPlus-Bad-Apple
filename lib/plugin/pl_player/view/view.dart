@@ -137,6 +137,9 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
 
   final _playerKey = GlobalKey();
   final _videoKey = GlobalKey();
+  bool _nativeSurfaceUpdateScheduled = false;
+  Rect? _lastNativeSurfaceRect;
+  String? _lastNativeSurfaceFit;
 
   final RxDouble _brightnessValue = 0.0.obs;
   final RxBool _brightnessIndicator = false.obs;
@@ -370,6 +373,7 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
 
   @override
   void dispose() {
+    plPlayerController.videoController?.setNativeVideoSurface(rect: null);
     removeObserverMobile(this);
     _danmakuListener?.cancel();
     _tapGestureRecognizer.dispose();
@@ -1351,11 +1355,23 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
       fontSize: 12,
     );
     final isLive = plPlayerController.isLive;
+    final nativeVideoHandle = plPlayerController.videoPlayerController?.handle;
 
     final child = Stack(
       fit: StackFit.passthrough,
       key: _playerKey,
       children: <Widget>[
+        if (Platform.isMacOS && nativeVideoHandle != null)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: AppKitView(
+                key: ValueKey(nativeVideoHandle),
+                viewType: 'com.alexmercerind/media_kit_video/native_video',
+                creationParams: {'handle': nativeVideoHandle.toString()},
+                creationParamsCodec: const StandardMessageCodec(),
+              ),
+            ),
+          ),
         _videoWidget,
 
         if (widget.danmuWidget case final danmaku?)
@@ -2010,7 +2026,7 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
       clipBehavior: .none,
       width: maxWidth,
       height: maxHeight,
-      color: widget.fill,
+      color: Platform.isMacOS ? Colors.transparent : widget.fill,
       child: Obx(
         () => MouseInteractiveViewer(
           scaleEnabled: !plPlayerController.controlsLock.value,
@@ -2037,6 +2053,7 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
             child: Obx(
               () {
                 final videoFit = plPlayerController.videoFit.value;
+                _scheduleNativeVideoSurface(videoFit.boxFit);
                 return Transform.flip(
                   flipX: plPlayerController.flipX.value,
                   flipY: plPlayerController.flipY.value,
@@ -2056,6 +2073,45 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
         ),
       ),
     );
+  }
+
+  void _scheduleNativeVideoSurface(BoxFit fit) {
+    if (!Platform.isMacOS || _nativeSurfaceUpdateScheduled) {
+      return;
+    }
+    _nativeSurfaceUpdateScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _nativeSurfaceUpdateScheduled = false;
+      if (!mounted) return;
+      final renderObject = _playerKey.currentContext?.findRenderObject();
+      if (renderObject is! RenderBox || !renderObject.hasSize) return;
+      final rawRect = MatrixUtils.transformRect(
+        renderObject.getTransformTo(null),
+        Offset.zero & renderObject.size,
+      );
+      final scale = MediaQuery.devicePixelRatioOf(context);
+      double align(double value) => (value * scale).round() / scale;
+      final rect = Rect.fromLTRB(
+        align(rawRect.left),
+        align(rawRect.top),
+        align(rawRect.right),
+        align(rawRect.bottom),
+      );
+      final fitName = switch (fit) {
+        BoxFit.cover => 'cover',
+        BoxFit.fill => 'fill',
+        _ => 'contain',
+      };
+      if (_lastNativeSurfaceRect == rect && _lastNativeSurfaceFit == fitName) {
+        return;
+      }
+      _lastNativeSurfaceRect = rect;
+      _lastNativeSurfaceFit = fitName;
+      plPlayerController.videoController?.setNativeVideoSurface(
+        rect: rect,
+        fit: fitName,
+      );
+    });
   }
 
   Future<void> screenshotWebp() async {

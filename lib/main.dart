@@ -129,7 +129,7 @@ void main() async {
   }
 
   Request();
-  Request.setCookie();
+  await Request.setCookie();
   RequestUtils.syncHistoryStatus();
 
   SmartDialog.config.toast = SmartConfigToast(displayType: .onlyRefresh);
@@ -172,11 +172,18 @@ void main() async {
       title: Constants.appName,
     );
     windowManager.waitUntilReadyToShow(windowOptions, () async {
+      await windowManager.setResizable(true);
+      await windowManager.setAspectRatio(0);
+      if (Platform.isMacOS) {
+        await windowManager.unmaximize();
+      }
       final windowSize = Pref.windowSize;
       await windowManager.setBounds(
         await calcWindowPosition(windowSize) & windowSize,
       );
-      if (Pref.isWindowMaximized) await windowManager.maximize();
+      if (!Platform.isMacOS && Pref.isWindowMaximized) {
+        await windowManager.maximize();
+      }
       await windowManager.show();
       await windowManager.focus();
     });

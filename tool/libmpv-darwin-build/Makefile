@@ -176,7 +176,7 @@ ${DOWNLOADS_DIR}: \
 	rm -rf ${TARGET_TMP_DIR} ${TARGET_DIR}
 	mkdir -p ${TARGET_OUTPUT_DIR}
 
-	go run cmd/downloads/main.go downloads.lock ${TARGET_OUTPUT_DIR}
+	python3 scripts/downloads.py downloads.lock ${TARGET_OUTPUT_DIR}
 
 	mv ${TARGET_OUTPUT_DIR} ${TARGET_DIR}
 	rm -rf ${TARGET_TMP_DIR}

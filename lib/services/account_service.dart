@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:PiliPlus/models/user/info.dart';
+import 'package:PiliPlus/utils/accounts.dart';
 import 'package:PiliPlus/utils/storage_pref.dart';
 import 'package:get/get.dart';
 
@@ -11,14 +12,9 @@ class AccountService extends GetxService {
   @override
   void onInit() {
     super.onInit();
-    UserInfoData? userInfo = Pref.userInfoCache;
-    if (userInfo != null) {
-      face.value = userInfo.face ?? '';
-      isLogin.value = true;
-    } else {
-      face.value = '';
-      isLogin.value = false;
-    }
+    final UserInfoData? userInfo = Pref.userInfoCache;
+    face.value = userInfo?.face ?? '';
+    isLogin.value = Accounts.main.isLogin;
   }
 }
 

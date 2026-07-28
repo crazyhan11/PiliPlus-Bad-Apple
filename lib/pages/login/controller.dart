@@ -745,7 +745,7 @@ class LoginPageController extends GetxController
             child: Text('取消', style: TextStyle(color: colorScheme.outline)),
           ),
           TextButton(
-            onPressed: () {
+            onPressed: () async {
               Get.back();
               for (final type in AccountType.values) {
                 final index = type.index;
@@ -753,7 +753,7 @@ class LoginPageController extends GetxController
                     ? selectAccount.first
                     : selectAccount[index];
                 if (account != Accounts.accountMode[index]) {
-                  Accounts.set(type, account);
+                  await Accounts.set(type, account);
                 }
               }
             },

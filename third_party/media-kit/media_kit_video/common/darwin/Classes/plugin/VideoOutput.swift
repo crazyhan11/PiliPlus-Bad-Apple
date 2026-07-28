@@ -34,9 +34,14 @@ public class VideoOutput: NSObject {
   private var texture: ResizableTextureProtocol!
   private var textureId: Int64 = -1
   private var currentSize: CGSize = CGSize.zero
+  private var nativeFrameSize: CGSize = CGSize.zero
   private var zeroSizeUpdateCount: Int = 0
   private var asynchronousFrameDelivery: Bool = false
+  private var didProbeSourceFrameRate = false
   private var disposed: Bool = false
+  #if canImport(FlutterMacOS)
+    private var nativePresenter: NativeVideoPresenter?
+  #endif
 
   init(
     handle: Int64,
@@ -56,6 +61,10 @@ public class VideoOutput: NSObject {
 
     super.init()
 
+    #if canImport(FlutterMacOS)
+      nativePresenter = NativeVideoPresenter()
+    #endif
+
     worker.enqueue {
       self._init()
     }
@@ -66,7 +75,48 @@ public class VideoOutput: NSObject {
 
     disposed = true
     disposeTextureId()
+    #if canImport(FlutterMacOS)
+      nativePresenter?.dispose()
+    #endif
   }
+
+  #if canImport(FlutterMacOS)
+    public func setNativeSurface(rect: CGRect?, fit: String) {
+      nativePresenter?.setFrame(rect, fit: fit)
+    }
+
+    func attachNativePlatformView(_ view: NativeVideoPlatformView) {
+      nativePresenter?.attachPlatformView(view)
+    }
+
+    public func setNativePlaybackRate(_ rate: Double) {
+      nativePresenter?.setPlaybackRate(rate)
+    }
+
+    public func configureDanmaku(_ values: [String: Any]) {
+      nativePresenter?.configureDanmaku(values)
+    }
+
+    public func addDanmaku(_ values: [[String: Any]], epoch: Int64) {
+      nativePresenter?.addDanmaku(values, epoch: epoch)
+    }
+
+    public func pauseDanmaku(epoch: Int64) {
+      nativePresenter?.pauseDanmaku(epoch: epoch)
+    }
+
+    public func resumeDanmaku(epoch: Int64) {
+      nativePresenter?.resumeDanmaku(epoch: epoch)
+    }
+
+    public func clearDanmaku(epoch: Int64) {
+      nativePresenter?.clearDanmaku(epoch: epoch)
+    }
+
+    public func setDanmakuOpacity(_ opacity: Float) {
+      nativePresenter?.setDanmakuOpacity(opacity)
+    }
+  #endif
 
   public func setSize(width: Int64?, height: Int64?) {
     worker.enqueue {
@@ -90,20 +140,50 @@ public class VideoOutput: NSObject {
     }
 
     if enableHardwareAcceleration {
-      #if canImport(Flutter) && !targetEnvironment(simulator)
+      #if (canImport(Flutter) || canImport(FlutterMacOS)) && !targetEnvironment(simulator)
         var iglError: NSString?
-        if let iglTexture = IGLMetalTexture(
-          handle: UnsafeMutableRawPointer(handle),
-          updateCallback: { [weak self]() in
-            guard let that = self else { return }
-            that.updateCallback()
-          },
-          frameReadyCallback: { [weak self]() in
-            guard let that = self else { return }
-            that.notifyTextureFrameAvailable()
-          },
-          error: &iglError
-        ) {
+        let updateCallback: IGLMetalTextureUpdateCallback = { [weak self]() in
+          guard let that = self else { return }
+          that.updateCallback()
+        }
+        let frameReadyCallback: IGLMetalTextureFrameReadyCallback = { [weak self]() in
+          guard let that = self else { return }
+          that.notifyTextureFrameAvailable()
+        }
+        #if canImport(FlutterMacOS)
+          let iglTexture = IGLMetalTexture(
+            handle: UnsafeMutableRawPointer(handle),
+            updateCallback: updateCallback,
+            frameReadyCallback: frameReadyCallback,
+            nativeFrameCallback: { [weak self] pixelBuffer, presentationTime,
+              displayWidth, displayHeight, rotate in
+              guard let self else { return }
+              let normalizedRotation = (rotate % 360 + 360) % 360
+              let swapsDimensions = normalizedRotation == 90 || normalizedRotation == 270
+              let frameWidth = swapsDimensions ? displayHeight : displayWidth
+              let frameHeight = swapsDimensions ? displayWidth : displayHeight
+              if frameWidth > 0 && frameHeight > 0 {
+                self.nativeFrameSize = CGSize(
+                  width: Double(frameWidth),
+                  height: Double(frameHeight)
+                )
+              }
+              self.nativePresenter?.enqueue(
+                pixelBuffer,
+                presentationTime: presentationTime
+              )
+            },
+            error: &iglError
+          )
+        #else
+          let iglTexture = IGLMetalTexture(
+            handle: UnsafeMutableRawPointer(handle),
+            updateCallback: updateCallback,
+            frameReadyCallback: frameReadyCallback,
+            error: &iglError
+          )
+        #endif
+        if let iglTexture {
           NSLog(
             "VideoOutput: renderer: \(iglTexture.rendererDescription)"
           )
@@ -111,7 +191,7 @@ public class VideoOutput: NSObject {
           texture = SafeResizableTexture(iglTexture)
         } else {
           NSLog(
-            "VideoOutput: IGL Metal unavailable, falling back to OpenGL ES: \(iglError ?? "unknown")"
+            "VideoOutput: IGL Metal unavailable, falling back to platform OpenGL: \(iglError ?? "unknown")"
           )
           texture = SafeResizableTexture(
             TextureHW(
@@ -184,6 +264,22 @@ public class VideoOutput: NSObject {
   private func _updateCallback() {
     let size = videoSize
 
+    #if canImport(FlutterMacOS)
+      if !didProbeSourceFrameRate {
+        let estimatedFrameRate = MPVHelpers.getDoubleProperty(
+          handle,
+          name: "estimated-vf-fps"
+        ) ?? 0
+        let frameRate = estimatedFrameRate > 0
+          ? estimatedFrameRate
+          : MPVHelpers.getDoubleProperty(handle, name: "container-fps") ?? 0
+        if frameRate > 0 {
+          nativePresenter?.setSourceFrameRate(frameRate)
+          didProbeSourceFrameRate = true
+        }
+      }
+    #endif
+
     if size.width == 0 || size.height == 0 {
       zeroSizeUpdateCount += 1
       if zeroSizeUpdateCount <= 3 {
@@ -225,23 +321,23 @@ public class VideoOutput: NSObject {
     }
   }
 
-    private var videoSize: CGSize {
-        // fixed size
-        if width != nil && height != nil {
-            return CGSize(
-                width: Double(width!),
-                height: Double(height!)
-            )
-        }
-        
-        let params = MPVHelpers.getVideoOutParams(handle)
-        return CGSize(
-            width: Double(width ?? (params.rotate == 0 || params.rotate == 180
-                                    ? params.dw
-                                    : params.dh)),
-            height: Double(height ?? (params.rotate == 0 || params.rotate == 180
-                                      ? params.dh
-                                      : params.dw))
-        )
+  private var videoSize: CGSize {
+    if width != nil && height != nil {
+      return CGSize(width: Double(width!), height: Double(height!))
+    }
+
+    if nativeFrameSize.width > 0 && nativeFrameSize.height > 0 {
+      return CGSize(
+        width: Double(width ?? Int64(nativeFrameSize.width)),
+        height: Double(height ?? Int64(nativeFrameSize.height))
+      )
+    }
+
+    let params = MPVHelpers.getVideoOutParams(handle)
+    let keepsDimensions = params.rotate == 0 || params.rotate == 180
+    return CGSize(
+      width: Double(width ?? (keepsDimensions ? params.dw : params.dh)),
+      height: Double(height ?? (keepsDimensions ? params.dh : params.dw))
+    )
   }
 }

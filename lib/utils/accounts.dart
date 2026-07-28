@@ -34,15 +34,30 @@ abstract final class Accounts {
   }
 
   static Future<void> refresh() {
+    for (int i = 0; i < AccountType.values.length; i++) {
+      accountMode[i] = AnonymousAccount();
+    }
     for (final a in account.values) {
       for (final t in a.type) {
         accountMode[t.index] = a;
       }
     }
+    Future<void>? migration;
+    if (account.length == 1 && accountMode.every((i) => !i.isLogin)) {
+      final onlyAccount = account.values.single;
+      onlyAccount.type.addAll(AccountType.values);
+      for (final type in AccountType.values) {
+        accountMode[type.index] = onlyAccount;
+      }
+      migration = onlyAccount.onChange();
+    }
     return Future.wait(
-      (accountMode.toSet()..removeWhere((i) => i.activated)).map(
-        Request.buvidActive,
-      ),
+      [
+        ?migration,
+        ...(accountMode.toSet()..removeWhere((i) => i.activated)).map(
+          Request.buvidActive,
+        ),
+      ],
     );
   }
 
@@ -72,6 +87,7 @@ abstract final class Accounts {
     final oldAccount = accountMode[key.index]..type.remove(key);
     accountMode[key.index] = account..type.add(key);
     await Future.wait([?account.onChange(), ?oldAccount.onChange()]);
+    await Accounts.account.flush();
     if (!account.activated) await Request.buvidActive(account);
     switch (key) {
       case AccountType.main:

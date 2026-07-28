@@ -1,4 +1,4 @@
-import 'dart:async' show StreamSubscription, Timer;
+import 'dart:async' show StreamSubscription, Timer, unawaited;
 import 'dart:convert' show ascii;
 import 'dart:io' show Platform;
 import 'dart:math' show max, min;
@@ -75,6 +75,10 @@ class PlPlayerController with BlockConfigMixin {
   static PlPlayerController? _instance;
 
   final playerStatus = PlPlayerStatus(.playing);
+  bool _playbackRequested = true;
+
+  bool get shouldRunDanmaku =>
+      _playbackRequested && playerStatus.isPlaying && !isBuffering.value;
 
   final Rx<DataStatus> dataStatus = Rx(.none);
 
@@ -887,6 +891,7 @@ class PlPlayerController with BlockConfigMixin {
       return null;
     }
     if (_videoPlayerController case final ctr? when (ctr.current.isNotEmpty)) {
+      _playbackRequested = true;
       return ctr.open(
         ctr.current.last.copyWith(start: ctr.state.position),
         play: true,
@@ -1125,10 +1130,12 @@ class PlPlayerController with BlockConfigMixin {
     lastPlaybackSpeed = playbackSpeed;
 
     if (speed == _videoPlayerController?.state.rate) {
+      await _videoController?.setNativeVideoPlaybackRate(speed);
       return;
     }
 
     await _videoPlayerController?.setRate(speed);
+    await _videoController?.setNativeVideoPlaybackRate(speed);
     _playbackSpeed.value = speed;
     if (danmakuController != null) {
       try {
@@ -1149,12 +1156,14 @@ class PlPlayerController with BlockConfigMixin {
   double playSpeedDefault = Pref.playSpeedDefault;
   Future<void> setDefaultSpeed() async {
     await _videoPlayerController?.setRate(playSpeedDefault);
+    await _videoController?.setNativeVideoPlaybackRate(playSpeedDefault);
     _playbackSpeed.value = playSpeedDefault;
   }
 
   /// 播放视频
   Future<void> play({bool repeat = false, bool hideControls = true}) async {
     if (_playerCount == 0) return;
+    _playbackRequested = true;
     // 播放时自动隐藏控制条
     controls = !hideControls;
     // repeat为true，将从头播放
@@ -1173,6 +1182,10 @@ class PlPlayerController with BlockConfigMixin {
 
   /// 暂停播放
   Future<void> pause({bool notify = true, bool isInterrupt = false}) async {
+    // Latch the user's intent before mpv acknowledges the pause. A delayed
+    // playing=true event must not resume native danmaku in this interval.
+    _playbackRequested = false;
+    danmakuController?.pause();
     await _videoPlayerController?.pause();
     playerStatus.value = PlayerStatus.paused;
 
@@ -1312,9 +1325,11 @@ class PlPlayerController with BlockConfigMixin {
   Future<void> onDoubleTapCenter() async {
     if (!isLive && isCompleted) {
       await videoPlayerController!.seek(Duration.zero);
-      videoPlayerController!.play();
+      await play();
+    } else if (_playbackRequested) {
+      await pause();
     } else {
-      videoPlayerController!.playOrPause();
+      await play();
     }
   }
 
@@ -1576,6 +1591,14 @@ class PlPlayerController with BlockConfigMixin {
     }
 
     _playerCount = 0;
+    if (PlatformUtils.isDesktop) {
+      unawaited(exitDesktopFullScreen());
+      if (isDesktopPip) {
+        unawaited(exitDesktopPip());
+      } else {
+        unawaited(windowManager.setAspectRatio(0));
+      }
+    }
     if (removeSafeArea) {
       showSystemBar();
     }

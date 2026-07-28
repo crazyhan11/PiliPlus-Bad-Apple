@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:PiliPlus/grpc/bilibili/community/service/dm/v1.pb.dart';
 import 'package:PiliPlus/pages/danmaku/controller.dart';
 import 'package:PiliPlus/pages/danmaku/danmaku_model.dart';
+import 'package:PiliPlus/pages/danmaku/macos_native_view.dart';
 import 'package:PiliPlus/plugin/pl_player/controller.dart';
 import 'package:PiliPlus/plugin/pl_player/models/play_status.dart';
 import 'package:PiliPlus/plugin/pl_player/utils/danmaku_options.dart';
@@ -41,6 +44,7 @@ class _PlDanmakuState extends State<PlDanmaku> {
 
   late final PlDanmakuController _plDanmakuController;
   DanmakuController<DanmakuExtra>? _controller;
+  StreamSubscription<bool>? _bufferingSubscription;
   int latestAddedPosition = -1;
 
   @override
@@ -65,6 +69,9 @@ class _PlDanmakuState extends State<PlDanmaku> {
     playerController
       ..addStatusLister(playerListener)
       ..addPositionListener(videoPositionListen);
+    _bufferingSubscription = playerController.isBuffering.listen(
+      (_) => _syncControllerRunning(),
+    );
   }
 
   @override
@@ -80,10 +87,15 @@ class _PlDanmakuState extends State<PlDanmaku> {
 
   // 播放器状态监听
   void playerListener(PlayerStatus status) {
+    _syncControllerRunning();
+  }
+
+  void _syncControllerRunning() {
     if (_controller case final controller?) {
-      if (status.isPlaying) {
+      final shouldRun = playerController.shouldRunDanmaku;
+      if (shouldRun && !controller.running) {
         controller.resume();
-      } else {
+      } else if (!shouldRun && controller.running) {
         controller.pause();
       }
     }
@@ -99,7 +111,7 @@ class _PlDanmakuState extends State<PlDanmaku> {
       return;
     }
 
-    if (!playerController.playerStatus.isPlaying) {
+    if (!playerController.shouldRunDanmaku) {
       return;
     }
 
@@ -162,6 +174,7 @@ class _PlDanmakuState extends State<PlDanmaku> {
     playerController
       ..removePositionListener(videoPositionListen)
       ..removeStatusLister(playerListener);
+    _bufferingSubscription?.cancel();
     _plDanmakuController.dispose();
     _controller = null;
     super.dispose();
@@ -173,20 +186,35 @@ class _PlDanmakuState extends State<PlDanmaku> {
       notFullscreen: widget.notFullscreen,
       speed: playerController.playbackSpeed,
     );
-    return Obx(
-      () => AnimatedOpacity(
-        opacity: playerController.enableShowDanmaku.value
-            ? playerController.danmakuOpacity.value
-            : 0,
+    return Obx(() {
+      final opacity = playerController.enableShowDanmaku.value
+          ? playerController.danmakuOpacity.value
+          : 0.0;
+      final handle = playerController.videoPlayerController?.handle;
+      if (Platform.isMacOS && handle != null) {
+        return MacOSNativeDanmaku<DanmakuExtra>(
+          handle: handle,
+          createdController: (e) {
+            playerController.danmakuController = _controller = e;
+            _syncControllerRunning();
+          },
+          option: option,
+          size: widget.size,
+          opacity: opacity,
+        );
+      }
+      return AnimatedOpacity(
+        opacity: opacity,
         duration: const Duration(milliseconds: 100),
         child: DanmakuScreen<DanmakuExtra>(
           createdController: (e) {
             playerController.danmakuController = _controller = e;
+            _syncControllerRunning();
           },
           option: option,
           size: widget.size,
         ),
-      ),
-    );
+      );
+    });
   }
 }

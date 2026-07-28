@@ -46,6 +46,14 @@ abstract class PlatformVideoController {
   /// * “With great power comes great responsibility”
   Future<void>? setSize({int? width, int? height});
 
+  Future<void>? setNativeVideoSurface({Rect? rect, String fit = 'contain'}) {
+    return null;
+  }
+
+  Future<void>? setNativeVideoPlaybackRate(double rate) {
+    return null;
+  }
+
   /// A [Future] that completes when the first video frame has been rendered.
   Future<void> get waitUntilFirstFrameRendered =>
       waitUntilFirstFrameRenderedCompleter.future;

@@ -1,9 +1,11 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
-/// Hosts iOS 26's native UIGlassEffect behind Flutter content.
+/// Hosts the native Apple glass material behind Flutter content.
 ///
 /// The platform view is display-only so gestures continue to be handled by
 /// the Flutter controls above it.
@@ -24,12 +26,17 @@ class IOSGlassSurface extends StatelessWidget {
   final IOSGlassStyle style;
 
   static bool get isSupported =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.iOS ||
+          defaultTargetPlatform == TargetPlatform.macOS);
 
   @override
   Widget build(BuildContext context) {
     if (!isSupported) {
       return child;
+    }
+    if (defaultTargetPlatform == TargetPlatform.macOS) {
+      return _macOSGlassSurface();
     }
 
     return Stack(
@@ -37,20 +44,54 @@ class IOSGlassSurface extends StatelessWidget {
       children: [
         Positioned.fill(
           child: IgnorePointer(
-            child: UiKitView(
-              viewType: _viewType,
-              hitTestBehavior: PlatformViewHitTestBehavior.transparent,
-              creationParams: {
-                'borderRadius': borderRadius,
-                'style': style.name,
-                'tint': tintColor.toARGB32(),
-              },
-              creationParamsCodec: const StandardMessageCodec(),
-            ),
+            child: _nativeGlassView(),
           ),
         ),
         child,
       ],
+    );
+  }
+
+  Widget _macOSGlassSurface() {
+    final radius = BorderRadius.circular(borderRadius);
+    return ClipRRect(
+      borderRadius: radius,
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(
+          sigmaX: style == IOSGlassStyle.regular ? 22 : 30,
+          sigmaY: style == IOSGlassStyle.regular ? 22 : 30,
+        ),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: tintColor,
+            borderRadius: radius,
+            border: Border.all(color: const Color(0x38FFFFFF), width: 0.75),
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+
+  Widget _nativeGlassView() {
+    final creationParams = {
+      'borderRadius': borderRadius,
+      'style': style.name,
+      'tint': tintColor.toARGB32(),
+    };
+    if (defaultTargetPlatform == TargetPlatform.macOS) {
+      return AppKitView(
+        viewType: _viewType,
+        hitTestBehavior: PlatformViewHitTestBehavior.transparent,
+        creationParams: creationParams,
+        creationParamsCodec: const StandardMessageCodec(),
+      );
+    }
+    return UiKitView(
+      viewType: _viewType,
+      hitTestBehavior: PlatformViewHitTestBehavior.transparent,
+      creationParams: creationParams,
+      creationParamsCodec: const StandardMessageCodec(),
     );
   }
 }

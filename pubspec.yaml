@@ -51,9 +51,7 @@ dependencies:
       path: cached_network_image
       ref: develop
   canvas_danmaku:
-    git:
-      url: https://github.com/bggRGjQaUbCoE/canvas_danmaku.git
-      ref: main
+    path: third_party/canvas_danmaku
   catcher_2:
     git:
       url: https://github.com/My-Responsitories/catcher_2.git
@@ -189,6 +187,8 @@ dependency_overrides:
     path: third_party/media-kit/libs/android/media_kit_libs_android_video
   media_kit_libs_ios_video:
     path: third_party/media-kit/libs/ios/media_kit_libs_ios_video
+  media_kit_libs_macos_video:
+    path: third_party/media-kit/libs/macos/media_kit_libs_macos_video
   media_kit_libs_video:
     path: third_party/media-kit/libs/universal/media_kit_libs_video
   media_kit_libs_windows_video:

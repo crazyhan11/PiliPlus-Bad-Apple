@@ -36,11 +36,11 @@ class Request {
   factory Request() => _instance;
 
   /// 设置cookie
-  static void setCookie() {
+  static Future<void> setCookie() async {
     accountManager = AccountManager();
     dio.interceptors.add(accountManager);
-    Accounts.refresh();
-    LoginUtils.setWebCookie();
+    unawaited(Accounts.refresh());
+    await LoginUtils.setWebCookie();
 
     if (Accounts.main.isLogin) {
       final coin = Pref.userInfoCache?.money;

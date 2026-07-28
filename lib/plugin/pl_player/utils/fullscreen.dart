@@ -21,14 +21,12 @@ Future<void> enterDesktopFullScreen({bool inAppFullScreen = false}) async {
 
 @pragma('vm:notify-debugger-on-exception')
 Future<void> exitDesktopFullScreen() async {
-  if (_isDesktopFullScreen) {
-    _isDesktopFullScreen = false;
-    try {
-      await const MethodChannel(
-        'com.alexmercerind/media_kit_video',
-      ).invokeMethod('Utils.ExitNativeFullscreen');
-    } catch (_) {}
-  }
+  _isDesktopFullScreen = false;
+  try {
+    await const MethodChannel(
+      'com.alexmercerind/media_kit_video',
+    ).invokeMethod('Utils.ExitNativeFullscreen');
+  } catch (_) {}
 }
 
 List<DeviceOrientation>? _lastOrientation;

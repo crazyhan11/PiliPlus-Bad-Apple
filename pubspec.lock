@@ -223,11 +223,9 @@ packages:
   canvas_danmaku:
     dependency: "direct main"
     description:
-      path: "."
-      ref: main
-      resolved-ref: "697d4516df2fc3ba7417c7ce9aba079d34ba13e5"
-      url: "https://github.com/bggRGjQaUbCoE/canvas_danmaku.git"
-    source: git
+      path: "third_party/canvas_danmaku"
+      relative: true
+    source: path
     version: "0.2.6"
   catcher_2:
     dependency: "direct main"
@@ -1132,12 +1130,11 @@ packages:
     source: hosted
     version: "1.2.1"
   media_kit_libs_macos_video:
-    dependency: transitive
+    dependency: "direct overridden"
     description:
-      name: media_kit_libs_macos_video
-      sha256: f26aa1452b665df288e360393758f84b911f70ffb3878032e1aabba23aa1032d
-      url: "https://pub.dev"
-    source: hosted
+      path: "third_party/media-kit/libs/macos/media_kit_libs_macos_video"
+      relative: true
+    source: path
     version: "1.1.4"
   media_kit_libs_video:
     dependency: "direct main"
