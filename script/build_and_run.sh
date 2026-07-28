@@ -16,6 +16,7 @@ BUILD_DIR="$PROJECT_DIR/build/macos-arm64"
 BUILT_APP="$BUILD_DIR/DerivedData/Build/Products/Release/$APP_NAME.app"
 APP_BUNDLE="${PILIPLUS_MACOS_OUTPUT:-$PROJECT_DIR/outputs/PiliPlus-Bad-Apple-macOS-arm64.app}"
 CUSTOM_FLUTTER_FRAMEWORK="${PILIPLUS_FLUTTER_FRAMEWORK:-$FLUTTER_ROOT/engine/src/out/host_release_arm64/FlutterMacOS.framework}"
+CUSTOM_MEDIA_FRAMEWORKS_DIR="${PILIPLUS_MEDIA_FRAMEWORKS_DIR:-$PROJECT_DIR/third_party/media-kit/libs/macos/media_kit_libs_macos_video/macos/Frameworks}"
 APP_FLUTTER_FRAMEWORK="$APP_BUNDLE/Contents/Frameworks/FlutterMacOS.framework"
 
 export RUBYOPT="-rlogger"
@@ -30,6 +31,7 @@ pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
 cd "$PROJECT_DIR"
 "$FLUTTER_BIN" pub get --offline
+"$FLUTTER_BIN" build macos --release --config-only --no-pub
 (cd macos && pod install)
 xcodebuild \
   -workspace macos/Runner.xcworkspace \
@@ -49,6 +51,14 @@ rm -rf "$APP_BUNDLE"
 rm -rf "$APP_FLUTTER_FRAMEWORK"
 /usr/bin/ditto "$CUSTOM_FLUTTER_FRAMEWORK" "$APP_FLUTTER_FRAMEWORK"
 /usr/bin/cmp "$CUSTOM_FLUTTER_FRAMEWORK/FlutterMacOS" "$APP_FLUTTER_FRAMEWORK/FlutterMacOS"
+while IFS= read -r -d '' framework; do
+  /usr/bin/ditto \
+    "$framework" \
+    "$APP_BUNDLE/Contents/Frameworks/$(basename "$framework")"
+done < <(
+  find "$CUSTOM_MEDIA_FRAMEWORKS_DIR" \
+    -maxdepth 4 -type d -path '*/macos-arm64/*.framework' -print0
+)
 /usr/bin/codesign --force --deep --sign - "$APP_BUNDLE"
 
 open_app() {
