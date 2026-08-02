@@ -70,9 +70,9 @@ macOS 当前最低目标为 macOS 14，已验证普通 SDR 播放、音频、窗
 FLUTTER_BIN=/path/to/flutter tool/package_ios_unsigned.sh
 ```
 
-## 最新发布（2026-08-02）
+## 最新发布（v5.2）
 
-最新发布见 [GitHub Release：2026-08-02](https://github.com/crazyhan11/PiliPlus-Bad-Apple/releases/tag/2026-08-02)。
+最新发布见 [GitHub Release：v5.2](https://github.com/crazyhan11/PiliPlus-Bad-Apple/releases/tag/v5.2)。
 
 - Android：`PiliPlus-Android-arm64-5396-com.example.piliplus.apk`（普通包名，Direct SurfaceControl 渲染）
 - iOS：`PiliPlus-Bad-Apple-iOS-arm64-PostV5.0.1-iPhone12Mini-VideoLiveFullscreen-BottomInsetFix-Candidate.ipa`（未签名）
