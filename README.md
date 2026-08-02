@@ -70,13 +70,32 @@ macOS 当前最低目标为 macOS 14，已验证普通 SDR 播放、音频、窗
 FLUTTER_BIN=/path/to/flutter tool/package_ios_unsigned.sh
 ```
 
-## 最新发布（v5.2）
+## 最新发布：PiliPlus Bad Apple v5.2
 
-最新发布见 [GitHub Release：v5.2](https://github.com/crazyhan11/PiliPlus-Bad-Apple/releases/tag/v5.2)。
+v5.2 是 Android 与 Apple 平台同版本正式发布：保留完整 B 站体验，同时把视频与弹幕从 Flutter 纹理/Canvas 路径迁移到各自系统的原生渲染链路，核心目标是“更省电、更流畅、不缩功能”。
 
-- Android：`PiliPlus-Android-arm64-5396-com.example.piliplus.apk`（普通包名，Direct SurfaceControl 渲染）
-- iOS：`PiliPlus-Bad-Apple-iOS-arm64-PostV5.0.1-iPhone12Mini-VideoLiveFullscreen-BottomInsetFix-Candidate.ipa`（未签名）
-- macOS：`PiliPlus-Bad-Apple-v5.0.1-macOS-arm64.zip`（macOS 14+，ad-hoc 签名）
+### Android（Direct 原生渲染）
+
+- 视频直出：MediaCodec 硬件解码经 SurfaceControl 直接合成，绕过 FlutterView 纹理回传，降低 CPU/GPU 开销与播放延迟。
+- 原生硬件弹幕：HWUI SurfaceControlViewHost 承载，位图缓存 + View 复用池，长消息自动截断，弹幕风暴有预算保护。
+- 生命周期闭环：页面覆盖即隐藏 Direct root，返回恢复、退出清理，杜绝旧画面残留与“进入下一个视频一直加载”。
+- 输入收口：播放器手势在控制条区域主动让位，滚动/离屏时重算 Direct 几何；大屏与平板横屏的底部控制条可正常操作。
+- 后台播放：audio_service + MediaSession 前台服务，Home 与息屏后进程、播放状态、媒体通知保持稳定。
+- 多形态回归：点播/直播切换、详情页连播、PiP、自由窗口均已覆盖。
+
+### Apple（iOS / macOS 原生播放）
+
+- 解码与显示：VideoToolbox 硬件解码，mpv `cvpixelbuffer` Render API 直接借用 CVPixelBuffer，SDR NV12/P010 与 HDR BT.2020 PQ/HLG 原生呈现。
+- 原生弹幕：CoreAnimation 层渲染普通/固定/特殊弹幕，Flutter 只负责界面、字幕与控制。
+- 平台适配：iOS 26 Liquid Glass 玻璃界面与 Dock；macOS 14+ 窗口/全屏/原生弹幕/HDR。
+- 功耗表现：原生路径相较纹理/Canvas 回传显著降低功耗，帧率与延迟也更稳定。
+
+### 下载
+
+- Android APK（普通包名）：`PiliPlus-Android-arm64-5396-com.example.piliplus.apk`
+- iOS IPA（未签名）：`PiliPlus-Bad-Apple-iOS-arm64-PostV5.0.1-iPhone12Mini-VideoLiveFullscreen-BottomInsetFix-Candidate.ipa`
+- macOS ZIP：`PiliPlus-Bad-Apple-v5.0.1-macOS-arm64.zip`
+- Release 入口：https://github.com/crazyhan11/PiliPlus-Bad-Apple/releases/tag/v5.2
 
 Android 版在不同机型上可能受系统帧率白名单限制；如遇帧率受限，自行改包名使用会更合适。
 
